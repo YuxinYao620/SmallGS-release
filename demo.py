@@ -20,7 +20,7 @@ from dust3r.utils.device import to_numpy
 from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
 from dust3r.utils.viz_demo import convert_scene_output_to_glb, get_dynamic_mask_from_pairviewer
 import matplotlib.pyplot as pl
-
+import time
 pl.ion()
 
 torch.backends.cuda.matmul.allow_tf32 = True  # for gpu >= Ampere and pytorch >= 1.12
@@ -91,6 +91,7 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
     from a list of images, run dust3r inference, global aligner.
     then run get_3D_model_from_scene
     """
+    start_time = time.time()
     translation_weight = float(translation_weight)
     if new_model_weights != args.weights:
         model = AsymmetricCroCo3DStereo.from_pretrained(new_model_weights).to(device)
@@ -171,7 +172,8 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         imgs.append(rgb(error_map))
         binary_error_map = (normalized_error_map > motion_mask_thre).astype(np.uint8)
         imgs.append(rgb(binary_error_map*255))
-
+    end_time = time.time()
+    print(f"Processing completed in {end_time-start_time:.2f} seconds. Output saved in {save_folder}")
     return scene, outfile, imgs
 
 

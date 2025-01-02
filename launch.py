@@ -33,6 +33,7 @@ if __name__ == '__main__':
             print(f'ATE mean: {ate_mean}, RPE trans mean: {rpe_trans_mean}, RPE rot mean: {rpe_rot_mean}')
         if args.mode == 'eval_depth':
             eval_mono_depth_estimation(args, model, device)
-
+        # if args.mode == 'eval_refined_pose':
+            
         exit(0)
     train(args)
