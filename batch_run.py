@@ -22,8 +22,8 @@ if __name__ == '__main__':
     # datasets = [l for l in os.listdir('/scratch/yy561/pointodyssey/val/') if os.path.isdir(os.path.join('/scratch/yy561/pointodyssey/val/', l))]
 
     for dataset_name in datasets:
-        with open('/scratch/yy561/pointodyssey/point_odyssey/cam_poses_{}.pkl'.format(dataset_name), 'rb') as f:
-        # with open('/scratch/yy561/pointodyssey/point_odyssey/cam_poses_{}_45_theta0.07.pkl'.format(dataset_name), 'rb') as f:
+        with open('/scratch/yy561/pointodyssey/point_odyssey/cam_poses_{}_30.pkl'.format(dataset_name), 'rb') as f:
+        # with open('/scratch/yy561/pointodyssey/point_odyssey/cam_poses_{}.pkl'.format(dataset_name), 'rb') as f:
             save = pickle.load(f)
         seq_ind = save['selected_frames']
         gt_cam_poses = save['cam_poses']
@@ -44,15 +44,15 @@ if __name__ == '__main__':
         output_dir = '{}/{}'.format(args.output_dir, dataset_name)
         if not os.path.exists(output_dir):
             os.makedirs(output_dir, exist_ok=True)
-
-        for ind in range(len(seq_ind)):
+        # breakpoint()
+        for ind in range(5):
+        # for ind in range(50):
 
             # seq dir 
             seq_dir = os.path.join(image_dir, 'seq_{}_{}'.format(seq_ind[ind][0], seq_ind[ind][-1]))
             print("Processing sequence: ",seq_dir)
             if not os.path.exists(seq_dir):
                 os.makedirs(seq_dir, exist_ok=False)
-            
 
             if len(os.listdir(seq_dir)) == 0: 
                 for frame_ind in seq_ind[ind]:
@@ -66,32 +66,40 @@ if __name__ == '__main__':
                     cmd = 'cp {} {}'.format(frame_path, seq_dir)
                     subprocess.run(cmd, shell=True)
 
-
+            
+            if not os.path.exists(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), "scene.glb")):
             # Construct the command
-            cmd = 'python demo_copy.py'
-            cmd += ' --input {}'.format(seq_dir)
-            cmd += ' --output_dir {}'.format(output_dir)
-            cmd += ' --seq_name {}'.format('seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]))
-            cmd += ' --gs_pose' if args.gs_pose else ''
-            cmd += ' --gs_refine' if args.gs_refine else ''
-            cmd += ' --camera_smoothness_lambda 1'
-            print(cmd)
+                cmd = 'python demo_copy.py'
+                cmd += ' --input {}'.format(seq_dir)
+                cmd += ' --output_dir {}'.format(output_dir)
+                cmd += ' --seq_name {}'.format('seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]))
+                # cmd += ' --gs_pose' if args.gs_pose else ''
+                # cmd += ' --gs_refine' if args.gs_refine else ''
+                # cmd += ' --camera_smoothness_lambda 1'
+                print(cmd)
 
-            # check whether exist dir, if is, skip 
-            # Execute the command
-            # time it 
-            start_time = time.time()
-            subprocess.run(cmd, shell=True)
-            elapsed_time = time.time() - start_time
-            print("Elapsed time: ", elapsed_time)
-            #record the time and save it to a file
-            try:
-                with open(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), 'time.txt'), 'a') as f:
-                    f.write('elapsed_time: {}'.format(elapsed_time))
-            except FileNotFoundError:
-                os.makedirs(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1])), exist_ok=True)
-                with open(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), 'time.txt'), 'a') as f:
-                    f.write('elapsed_time: {}'.format(elapsed_time))
-            # save the camera poses
+                subprocess.run(cmd, shell=True)
+
+            # print("finished processing sequence: ", seq_dir)
+
+            if args.gs_refine and not os.path.exists(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), "refined_pose.txt")):
+                cmd = 'python demo_copy.py'
+                cmd += ' --input {}'.format(seq_dir)
+                cmd += ' --output_dir {}'.format(output_dir)
+                cmd += ' --seq_name {}'.format('seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]))
+                # cmd += ' --gs_pose' if args.gs_pose else ''
+                cmd += ' --gs_refine'
+                cmd += ' --camera_smoothness_lambda 1'
+                subprocess.run(cmd, shell=True)
+
+            if args.gs_pose and not os.path.exists(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), "gs_pose.txt")):
+                cmd = 'python demo_copy.py'
+                cmd += ' --input {}'.format(seq_dir)
+                cmd += ' --output_dir {}'.format(output_dir)
+                cmd += ' --seq_name {}'.format('seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]))
+                cmd += ' --gs_pose'
+                cmd += ' --camera_smoothness_lambda 1'
+
+                subprocess.run(cmd, shell=True)
+
             np.save(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), 'cam_poses.npy'), np.array(gt_cam_poses[ind]))
-            print("finished processing sequence: ", seq_dir)

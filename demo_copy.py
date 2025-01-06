@@ -207,25 +207,26 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
     monst3r_time = 0
     gs_refine_time = 0
     start_time = time.time()
-    # if not args.gs_refine and not args.gs_pose:
-    if True:
-        translation_weight = float(translation_weight)
-        if new_model_weights != args.weights:
-            model = AsymmetricCroCo3DStereo.from_pretrained(new_model_weights).to(device)
-        model.eval()
-        if seq_name != "NULL":
-            dynamic_mask_path = f'data/davis/DAVIS/masked_images/480p/{seq_name}'
-        else:
-            dynamic_mask_path = None
-        imgs = load_images(filelist, size=image_size, verbose=not silent, dynamic_mask_root=dynamic_mask_path, fps=fps, num_frames=num_frames)
-        if len(imgs) == 1:
-            imgs = [imgs[0], copy.deepcopy(imgs[0])]
-            imgs[1]['idx'] = 1
-        if scenegraph_type == "swin" or scenegraph_type == "swinstride" or scenegraph_type == "swin2stride":
-            scenegraph_type = scenegraph_type + "-" + str(winsize) + "-noncyclic"
-        elif scenegraph_type == "oneref":
-            scenegraph_type = scenegraph_type + "-" + str(refid)
+    # if True:
+    translation_weight = float(translation_weight)
+    if new_model_weights != args.weights:
+        model = AsymmetricCroCo3DStereo.from_pretrained(new_model_weights).to(device)
+    model.eval()
+    if seq_name != "NULL":
+        dynamic_mask_path = f'data/davis/DAVIS/masked_images/480p/{seq_name}'
+    else:
+        dynamic_mask_path = None
+    imgs = load_images(filelist, size=image_size, verbose=not silent, dynamic_mask_root=dynamic_mask_path, fps=fps, num_frames=num_frames)
+    if len(imgs) == 1:
+        imgs = [imgs[0], copy.deepcopy(imgs[0])]
+        imgs[1]['idx'] = 1
+    if scenegraph_type == "swin" or scenegraph_type == "swinstride" or scenegraph_type == "swin2stride":
+        scenegraph_type = scenegraph_type + "-" + str(winsize) + "-noncyclic"
+    elif scenegraph_type == "oneref":
+        scenegraph_type = scenegraph_type + "-" + str(refid)
 
+    # if not args.gs_refine and not args.gs_pose:
+    if not args.gs_pose:
         pairs = make_pairs(imgs, scene_graph=scenegraph_type, prefilter=None, symmetrize=True)
         output = inference(pairs, model, device, batch_size=batch_size, verbose=not silent)
         if len(imgs) > 2:
@@ -274,7 +275,7 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
             traj_gs.align(traj_monst3r, correct_scale=True, correct_only_scale=False)        
             gs_camera_t = torch.Tensor(traj_gs.positions_xyz)
             gs_camera_q = torch.Tensor(traj_gs.orientations_quat_wxyz)
-            gs_camera_pose = torch.cat([gs_camera_t, gs_camera_q], dim=1).to(scene.device)
+            gs_camera_pose = torch.cat([gs_camera_t, gs_camera_q], dim=1).to(device)
 
             # set im poses
             scene.post_set_pose(gs_camera_pose)
@@ -366,7 +367,7 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         # translation
         t = gs_pose[:,:3, 3]
         # set the camera pose
-        camera_pose = torch.cat([quat,t], dim=1).to(scene.device)
+        camera_pose = torch.cat([quat,t], dim=1).to(device)
         tostr = lambda a: " ".join(map(str, a))
 
         # save the refined camera poses
@@ -378,7 +379,7 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
                 )
 
         gs_camera_end_time = time.time()
-        gs_camera_time = gs_camera_end_time - end_time
+        gs_camera_time = gs_camera_end_time - gs_camera_end_time
         # print(f"GS camera pose estimation completed in {gs_camera_time:.2f} seconds. Output saved in {outdir}/{seq_name}")
         # total_time = gs_camera_end_time - start_time
         # write the times to a file
@@ -391,29 +392,21 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         # # run evaluation 
         # eval_monst3r_gs_poses(args)
 
-        return scene, outfile, imgs
+        return None, None, imgs
 
     if args.gs_refine:
-        monst3r_traj = scene.save_tum_poses(f'{outdir}/{seq_name}/pred_traj_before_refine.txt')
+        # monst3r_traj = scene.save_tum_poses(f'{outdir}/{seq_name}/pred_traj_before_refine.txt')
         # load the camera poses estimated by monst3r
-        # with Path(f"{outdir}/{seq_name}/pred_traj_before_refine.txt").open("r") as f:
-        #     monster_pose = f.readlines()
-        #     monster_pose = np.array([list(map(float,pose.split())) for pose in monster_pose])
-        
-        # # monst3r_traj = torch.Tensor(monster_pose[]
-        # # #quat 3:7, t 1:3
-        # breakpoint()
-        # pose_monster = PosePath3D(
-        #     positions_xyz=monster_pose[:,1:4],
-        #     orientations_quat_wxyz=monster_pose[:,4:])
-    
+        with Path(f"{outdir}/{seq_name}/pred_traj.txt").open("r") as f:
+            monster_pose = f.readlines()
+            monster_pose = np.array([list(map(float,pose.split())) for pose in monster_pose])
+        monst3r_traj = torch.Tensor([pose[1:] for pose in monster_pose])
+
         print('using gaussian splatting to refine camera poses')
         args.workspace = f'{args.output_dir}/{seq_name}' 
         args.data_dir = args.input_dir
         args.monst3r_dir = f'{args.output_dir}/{seq_name}' 
 
-        # monst3r_camera_pose = monst3r_traj
-        breakpoint()
         from gs.datasets.colmap import quaternion_to_matrix
         monst3r_traj = torch.Tensor(monst3r_traj)
         rot_mat = quaternion_to_matrix(monst3r_traj[:,3:7])
@@ -474,10 +467,10 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         # translation
         t = refined_pose[:,:3, 3]
         # set the camera pose
-        camera_pose = torch.cat([quat,t], dim=1).to(scene.device)
+        camera_pose = torch.cat([quat,t], dim=1).to(device)
 
-        scene.post_set_pose(camera_pose)
-        scene.im_poses = torch.nn.Parameter(camera_pose)
+        # scene.post_set_pose(camera_pose)
+        # scene.im_poses = torch.nn.Parameter(camera_pose)
         # save the refined camera poses
         with Path(f"{outdir}/{seq_name}/refined_pose.txt").open("w") as f:
             for i in range(len(camera_pose)):
@@ -487,16 +480,19 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
                 )
 
         gs_end_time = time.time()
-        gs_refine_time = gs_end_time - end_time
+        gs_refine_time = gs_end_time - gs_end_time
         # print(f"GS refine completed in {gs_end_time-end_time:.2f} seconds. Output saved in {outdir}/{seq_name}")
         total_time = gs_end_time - start_time
         # write the times to a file
         with Path(f"{outdir}/{seq_name}/time.txt").open("w") as f:
             # f.write(f"MonST3R time: {monst3r_time:.2f}\n")
             f.write(f"GS refine time: {gs_refine_time:.2f}\n")
-            f.write(f"Total time with GS refinement: {total_time:.2f}\n")
         # # run evaluation 
         # eval_monst3r_gs_poses(args)
+        return None, None, imgs
+        
+    
+    return scene, outfile, imgs
 
 
 def get_pose_from_gs(args):
@@ -631,61 +627,61 @@ def main_demo(tmpdirname, model, device, image_size, server_name, server_port, s
                                     outputs=outmodel)
     demo.launch(share=args.share, server_name=server_name, server_port=server_port)
 
-def eval_monst3r_gs_poses(args):
-    import json
-    from dust3r.utils.vo_eval import load_traj, eval_metrics, plot_trajectory, save_trajectory_tum_format, process_directory, calculate_averages
-    from evo.core.trajectory import PoseTrajectory3D,PosePath3D
-    if os.path.isdir(args.input_dir):    # input_dir is a directory of images
-        input_files = [os.path.join(args.input_dir, fname) for fname in sorted(os.listdir(args.input_dir))]
-    seq = args.seq_name
-    monst3r_traj_path  = f'{args.output_dir}/{seq}/pred_traj_before_refine.txt'
-    refined_traj_path = f'{args.output_dir}/{seq}/refined_pose.txt'
-    gt_path = f'{args.output_dir}/{args.seq_name}/cam_poses.npy'
-    gt_pose = np.load(gt_path)
-    timestamps_mat = np.arange(gt_pose.shape[0]).astype(float)
+# def eval_monst3r_gs_poses(args):
+#     import json
+#     from dust3r.utils.vo_eval import load_traj, eval_metrics, plot_trajectory, save_trajectory_tum_format, process_directory, calculate_averages
+#     from evo.core.trajectory import PoseTrajectory3D,PosePath3D
+#     if os.path.isdir(args.input_dir):    # input_dir is a directory of images
+#         input_files = [os.path.join(args.input_dir, fname) for fname in sorted(os.listdir(args.input_dir))]
+#     seq = args.seq_name
+#     monst3r_traj_path  = f'{args.output_dir}/{seq}/pred_traj_before_refine.txt'
+#     refined_traj_path = f'{args.output_dir}/{seq}/refined_pose.txt'
+#     gt_path = f'{args.output_dir}/{args.seq_name}/cam_poses.npy'
+#     gt_pose = np.load(gt_path)
+#     timestamps_mat = np.arange(gt_pose.shape[0]).astype(float)
 
-    # monst3r pose
-    with open(monst3r_traj_path, 'r') as f:
-        monster_pose = f.readlines()
-        monster_pose = np.array([list(map(float,pose.split())) for pose in monster_pose])
+#     # monst3r pose
+#     with open(monst3r_traj_path, 'r') as f:
+#         monster_pose = f.readlines()
+#         monster_pose = np.array([list(map(float,pose.split())) for pose in monster_pose])
     
-    pose_monster = PosePath3D(
-        positions_xyz=monster_pose[:,1:4],
-        orientations_quat_wxyz=monster_pose[:,4:])
-    traj_monster = PoseTrajectory3D(poses_se3=pose_monster.poses_se3, timestamps=timestamps_mat)
-    # refined pose
+#     pose_monster = PosePath3D(
+#         positions_xyz=monster_pose[:,1:4],
+#         orientations_quat_wxyz=monster_pose[:,4:])
+#     traj_monster = PoseTrajectory3D(poses_se3=pose_monster.poses_se3, timestamps=timestamps_mat)
+#     # refined pose
     
-    with open(refined_traj_path, 'r') as f:
-        refined_pose = f.readlines()
-        refined_pose = np.array([list(map(float,pose.split())) for pose in refined_pose])
-    pose_refined = PosePath3D(
-        positions_xyz=refined_pose[:,1:4],
-        orientations_quat_wxyz=refined_pose[:,4:])
-    traj_refined = PoseTrajectory3D(poses_se3=pose_refined.poses_se3, timestamps=timestamps_mat)
+#     with open(refined_traj_path, 'r') as f:
+#         refined_pose = f.readlines()
+#         refined_pose = np.array([list(map(float,pose.split())) for pose in refined_pose])
+#     pose_refined = PosePath3D(
+#         positions_xyz=refined_pose[:,1:4],
+#         orientations_quat_wxyz=refined_pose[:,4:])
+#     traj_refined = PoseTrajectory3D(poses_se3=pose_refined.poses_se3, timestamps=timestamps_mat)
     
-    pose_gt = PosePath3D(poses_se3=gt_pose)
-    traj_gt = PoseTrajectory3D(poses_se3=pose_gt.poses_se3, timestamps=timestamps_mat)
+#     pose_gt = PosePath3D(poses_se3=gt_pose)
+#     traj_gt = PoseTrajectory3D(poses_se3=pose_gt.poses_se3, timestamps=timestamps_mat)
 
-    monst3r_ate, monst3r_rpe_trans, monst3r_rpe_rot = eval_metrics(
-                traj_monster, traj_gt, seq=seq, filename=f'{args.output_dir}/{seq}/monst3r_eval_metric.txt'
-            )
-    print(f"Monst3r ATE: {monst3r_ate}, Monst3r RPE Trans: {monst3r_rpe_trans}, Monst3r RPE Rot: {monst3r_rpe_rot}")
+#     monst3r_ate, monst3r_rpe_trans, monst3r_rpe_rot = eval_metrics(
+#                 traj_monster, traj_gt, seq=seq, filename=f'{args.output_dir}/{seq}/monst3r_eval_metric.txt'
+#             )
+#     print(f"Monst3r ATE: {monst3r_ate}, Monst3r RPE Trans: {monst3r_rpe_trans}, Monst3r RPE Rot: {monst3r_rpe_rot}")
 
-    refined_ate, refined_rpe_trans, refined_rpe_rot = eval_metrics(
-                traj_refined, traj_gt, seq=seq, filename=f'{args.output_dir}/{seq}/refined_eval_metric.txt'
-            )
-    print(f"Refined ATE: {refined_ate}, Refined RPE Trans: {refined_rpe_trans}, Refined RPE Rot: {refined_rpe_rot}")
+#     refined_ate, refined_rpe_trans, refined_rpe_rot = eval_metrics(
+#                 traj_refined, traj_gt, seq=seq, filename=f'{args.output_dir}/{seq}/refined_eval_metric.txt'
+#             )
+#     print(f"Refined ATE: {refined_ate}, Refined RPE Trans: {refined_rpe_trans}, Refined RPE Rot: {refined_rpe_rot}")
 
-    # record the evaluation results in json
-    eval_results = {
-        "monst3r_ate": monst3r_ate,
-        "monst3r_rpe_trans": monst3r_rpe_trans,
-        "monst3r_rpe_rot": monst3r_rpe_rot,
-        "refined_ate": refined_ate,
-        "refined_rpe_trans": refined_rpe_trans,
-        "refined_rpe_rot": refined_rpe_rot
-    }
-    json.dump(eval_results, open(f'{args.output_dir}/{seq}/eval_results_gs_monst3r.json', 'w'))
+#     # record the evaluation results in json
+#     eval_results = {
+#         "monst3r_ate": monst3r_ate,
+#         "monst3r_rpe_trans": monst3r_rpe_trans,
+#         "monst3r_rpe_rot": monst3r_rpe_rot,
+#         "refined_ate": refined_ate,
+#         "refined_rpe_trans": refined_rpe_trans,
+#         "refined_rpe_rot": refined_rpe_rot
+#     }
+#     json.dump(eval_results, open(f'{args.output_dir}/{seq}/eval_results_gs_monst3r.json', 'w'))
 
 if __name__ == '__main__':
     parser = get_args_parser()
@@ -714,7 +710,8 @@ if __name__ == '__main__':
     if not args.silent:
         print('Outputting stuff in', tmpdirname)
     if args.eval_only:
-        eval_monst3r_gs_poses(args)
+        # eval_monst3r_gs_poses(args)
+        print("go to batch_eval_camera.py")
 
     elif args.input_dir is not None:
         # Process images in the input directory with default parameters

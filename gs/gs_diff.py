@@ -706,8 +706,33 @@ class Runner:
             max_steps_local = self.opt.max_steps
         pbar = tqdm.tqdm(range(0, max_steps_local))
         for step in pbar:
+                
+                
             if camera_opt:
                 camtoworlds_transformed = self.pose_adjust(camtoworlds, image_ids)
+                if step % 100 == 0:
+                # save the intermediate result
+                    # write camera pose 
+                    from pathlib import Path
+                    from scipy.spatial.transform import Rotation
+                    tostr = lambda x: " ".join([str(i) for i in x])
+                    refined_pose = torch.cat([torch.Tensor(pose).unsqueeze(0) for pose in camtoworlds_transformed], dim=0)
+                    gs_pose_R = refined_pose[:,:3, :3]
+                    gs_pose_R = gs_pose_R.detach().cpu().numpy()
+                    quat = Rotation.from_matrix(gs_pose_R)
+                    quat = quat.as_quat()
+                    quat = torch.Tensor(quat).to(self.device)
+                    # translation
+                    t = refined_pose[:,:3, 3]
+                    # set the camera pose
+                    camera_pose = torch.cat([quat,t], dim=1).to(self.device)
+                    with Path(f"{self.opt.workspace}/traj/refined_pose_{step}.txt").open("w") as f:
+                        for i in range(len(camera_pose)):
+                            ith_pose = camera_pose[i]
+                            f.write(
+                                f"{i} {tostr(ith_pose[-3::].detach().cpu().numpy())} {tostr(ith_pose[[0,1,2,3]].detach().cpu().numpy())}\n"
+                            )
+
 
             renders , alphas, info = self.rasterize_splats(
                 camtoworlds= camtoworlds_transformed if camera_opt else camtoworlds,
@@ -1043,6 +1068,7 @@ class Runner:
                 global_cam_poses_est += [ pose.cpu().numpy() for pose in transfomed_pose ]
                 global_cam_poses_gt += [ pose.cpu().numpy() for pose in camtoworlds_gt[1:]]
             else:
+                breakpoint()
                 est_cam_pose = camtoworlds
                 global_cam_poses_est += [camtoworlds.cpu().detach().numpy()]
                 global_cam_poses_gt += [camtoworlds_gt.cpu().detach().numpy()]
@@ -1053,8 +1079,6 @@ class Runner:
 
             self.plot_traj(np.array(global_cam_poses_est), np.array(global_cam_poses_gt), start_frame, block_end)
 
-            # save checkpoint before updating the model
-            # if block_end >= end_frame:
         if opt.eval_overall_gs:
             self.train_gs_doma(opt.sh_degree, global_cam_poses_est)
         print("pose_ckpt", opt.pose_ckpt)
