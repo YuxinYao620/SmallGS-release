@@ -310,9 +310,9 @@ class PointCloudOptimizer(BasePCOptimizer):
         self._check_all_imgs_are_selected(pose_msk)
 
         if isinstance(known_poses, torch.Tensor) and known_poses.ndim == 2:
-            known_poses = [known_poses]
-        if known_poses.shape[-1] == 7: # xyz wxyz
-            known_poses = [tum_to_pose_matrix(pose) for pose in known_poses]
+            known_poses = [known_poses[i] for i in range(self.n_imgs)]
+        if known_poses[0].shape[-1] == 7: # xyz wxyz
+            known_poses = [tum_to_pose_matrix(pose.cpu().numpy()) for pose in known_poses]
         for idx, pose in zip(self._get_msk_indices(pose_msk), known_poses):
             if self.verbose:
                 print(f' (setting pose #{idx} = {pose[:3,3]})')
@@ -328,6 +328,27 @@ class PointCloudOptimizer(BasePCOptimizer):
                 self.im_poses.requires_grad_(False)
         self.norm_pw_scale = False
 
+    def post_set_pose(self, known_poses, pose_msk=None, requires_grad=False):  # cam-to-world
+        self._check_all_imgs_are_selected(pose_msk)
+
+        # if isinstance(known_poses, torch.Tensor) and known_poses.ndim == 2:
+        #     known_poses = [known_poses[i] for i in range(self.n_imgs)]
+        if known_poses[0].shape[-1] == 7: # xyz wxyz
+            known_poses = [tum_to_pose_matrix(pose.cpu().numpy()) for pose in known_poses]
+        for idx, pose in zip(self._get_msk_indices(pose_msk), known_poses):
+            if self.verbose:
+                print(f' (setting pose #{idx} = {pose[:3,3]})')
+            self._set_pose(self.im_poses, idx, torch.tensor(pose))
+
+        # normalize scale if there's less than 1 known pose
+        n_known_poses = sum((p.requires_grad is False) for p in self.im_poses)
+        self.norm_pw_scale = (n_known_poses <= 1)
+        if len(known_poses) == self.n_imgs:
+            if requires_grad:
+                self.im_poses.requires_grad_(True)
+            else:
+                self.im_poses.requires_grad_(False)
+        self.norm_pw_scale = False
     def preset_intrinsics(self, known_intrinsics, msk=None):
         if isinstance(known_intrinsics, torch.Tensor) and known_intrinsics.ndim == 2:
             known_intrinsics = [known_intrinsics]

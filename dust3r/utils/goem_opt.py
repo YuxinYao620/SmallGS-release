@@ -4,6 +4,7 @@ from torch import nn
 from torch.nn import functional as F
 import math
 from scipy.spatial.transform import Rotation
+import numpy as np
 
 def tum_to_pose_matrix(pose):
     # pose: [tx, ty, tz, qw, qx, qy, qz]

@@ -17,6 +17,7 @@ from pytorch3d.utils import opencv_from_cameras_projection
 from pytorch3d.renderer import PerspectiveCameras
 from pytorch3d.transforms import matrix_to_quaternion, quaternion_to_matrix
 import math
+import pickle
 
 from gs.Marigold.marigold import MarigoldPipeline
 
@@ -174,6 +175,7 @@ class Parser:
         monst3r_cam_pose = None,
         monst3r_cam_intr = None,
         monst3r_use_cam = True,
+        eval_pkl = None
     ):
         self.data_dir = data_dir
         self.factor = factor
@@ -182,16 +184,23 @@ class Parser:
 
         self.spec_data_path = None
         self.spec_cam_path = None
+        self.semantic_path = None
+        self.depth_path = None
 
         if type == "monst3r":
+
             self.data_dir = data_dir 
             self.semantic_path = os.path.join(monst3r_dir, "semantics")
             self.depth_path = os.path.join(monst3r_dir, "depths")
-
-            image_names = glob.glob(os.path.join(monst3r_dir, "frame*.png"))
-            self.image_names = [name.split('/')[-1] for name in image_names]
-            self.image_paths = [os.path.join(monst3r_dir, f) for f in self.image_names]
-            seq_len = len(self.image_names)
+            if data_dir is not list:
+                image_names = glob.glob(os.path.join(monst3r_dir, "frame*.png"))
+                self.image_names = [name.split('/')[-1] for name in image_names]
+                self.image_paths = [os.path.join(monst3r_dir, f) for f in self.image_names]
+                seq_len = len(self.image_names)
+            else:
+                image_names = data_dir
+                self.image_names = [name.split('/')[-1] for name in image_names]
+                self.image_paths = data_dir
             if monst3r_use_cam or os.path.exists(os.path.join(monst3r_dir,"pred_traj_monst3r_for_refine.txt")):
                 try:
                     monst3r_cam_pose_path = os.path.join(monst3r_dir,"pred_traj_monst3r_for_refine.txt")
@@ -225,7 +234,7 @@ class Parser:
                 with open(intr_mat_path) as f:
                     monst3r_cam_intr = f.readlines()
                     monst3r_cam_intr = torch.Tensor(np.array([list(map(float,intr.split())) for intr in monst3r_cam_intr]))
-            monst3r_cam_intr = monst3r_cam_intr[0].reshape(3,3)
+            monst3r_cam_intr = monst3r_cam_intr[0].reshape(3,3).cpu().numpy()
 
             self.Ks_dict = {0: monst3r_cam_intr}
 
@@ -251,6 +260,12 @@ class Parser:
             # 
             self.scene_scale = 1.0
             return
+        # if type == "eval_dataset":
+        #     self.image_paths = data_dir
+            
+
+
+
         if type == "colmap":
             colmap_dir = os.path.join(data_dir, "sparse/0/")
             if not os.path.exists(colmap_dir):
@@ -503,15 +518,22 @@ class Parser:
             self.transform = np.eye(4)
             # no distortion
         elif type == "custom":
-            data_info = data_dir.split('/')
-            seq_name = data_info[-1]
+            if data_dir is not list:
+                data_info = data_dir.split('/')
+                seq_name = data_info[-1]
+                image_names = [name for name in sorted(os.listdir(os.path.join(data_dir)))]
+                seq_len = len(image_names)
+                # find one image to get the size
+                image = imageio.imread(os.path.join(data_dir,image_names[0]))[..., :3]
+            else:
+                data_dir = os.path.dirname(data_dir[0])
+                data_info = data_dir.split('/')
+                seq_name = data_info[-1]
+                image_names = [name.split('/')[-1] for name in image_names]
+                seq_len = len(image_names)
+                image = imageio.imread(data_dir[0])[..., :3]
+            # image_names = [name for name in sorted(os.listdir(os.path.join(data_dir)),key = lambda x: int(x.split(".")[-2].split("_")[-1]))]
 
-            # image_names = [name for name in sorted(os.listdir(os.path.join(data_dir,"images")))]
-            image_names = [name for name in sorted(os.listdir(os.path.join(data_dir,"images")),key = lambda x: int(x.split(".")[-2].split("_")[-1]))]
-            seq_len = len(image_names)
-
-            # find one image to get the size
-            image = imageio.imread(os.path.join(data_dir,"images",image_names[0]))[..., :3]
             height, width = image.shape[:2]
             # camera intrinsics
             if os.path.exists(os.path.join(data_dir, "camcalib","spec.pkl")):
@@ -577,7 +599,7 @@ class Parser:
             camtoworlds = np.repeat(identity_matrix[np.newaxis, :, :], seq_len, axis=0)
             
             self.image_names = image_names
-            self.image_paths = [os.path.join(data_dir,"images", f) for f in self.image_names]
+            # self.image_paths = [os.path.join(data_dir,"images", f) for f in self.image_names]
             self.camtoworlds = camtoworlds
             self.camera_ids = [0] * seq_len
             self.Ks_dict = {0: intr_mat}
@@ -591,9 +613,16 @@ class Parser:
             self.point_indices = None
             self.transform = np.eye(4)
 
+            self.semantic_path = os.path.join(monst3r_dir,"semantics_langsam")
+            self.depth_path = os.path.join(monst3r_dir,"depths_marigold")
+            if os.path.exists(os.path.join(data_dir,self.image_names[0])):
+                self.image_paths = [os.path.join(data_dir, f) for f in self.image_names]
+            else:
+                self.image_paths = data_dir
 
-        self.semantic_path = os.path.join(data_dir, "semantics")
-        self.depth_path = os.path.join(data_dir, "depths")
+        
+        self.semantic_path = os.path.join(data_dir, "semantics") if self.semantic_path is None else self.semantic_path
+        self.depth_path = os.path.join(data_dir, "depths") if self.depth_path is None else self.depth_path
         os.makedirs(self.semantic_path, exist_ok=True)
         os.makedirs(self.depth_path, exist_ok=True)
         
@@ -681,6 +710,10 @@ class Dataset:
                 midas_transforms = torch.hub.load("intel-isl/MiDaS", "transforms")
                 self.depth_transforms = midas_transforms.dpt_transform
                 self.depth_model = midas
+        if os.path.exists(self.parser.semantic_path) and len(os.listdir(self.parser.semantic_path)) > 0:
+            pass
+        else:
+            breakpoint()
         if self.split == "val":
             self.indices = self.indices[:: self.parser.test_every]
 
@@ -708,7 +741,8 @@ class Dataset:
             image = imageio.imread(self.parser.image_paths[index])[..., :3]
             
             camera_id = self.parser.camera_ids[index]
-            K = self.parser.Ks_dict[camera_id].cpu().numpy().copy()  # undistorted K
+            # K = self.parser.Ks_dict[camera_id].cpu().numpy().copy()  # undistorted K
+            K = self.parser.Ks_dict[camera_id].copy()  # undistorted K
             
             # resize large images according to factor
             if self.parser.factor > 1:
@@ -878,7 +912,6 @@ class Dataset:
 
             if self.load_semantics and self.datatype == "custom":
                 assert os.path.exists(self.parser.semantic_path + f"/{self.parser.image_names[index].split('.')[0]}.npy") , f"Semantic mask not found for {self.parser.image_names[index].split('.')[0]}"
-
                 mask = np.load(self.parser.semantic_path + f"/{self.parser.image_names[index].split('.')[0]}.npy")
                 mask = torch.from_numpy(mask).bool()
                 if self.parser.factor > 1:

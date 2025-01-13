@@ -1,6 +1,4 @@
 # minimal requirements for inference
-torch
-torchvision
 roma
 gradio
 matplotlib

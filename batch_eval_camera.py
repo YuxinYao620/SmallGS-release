@@ -5,26 +5,30 @@ import os
 import time
 import json
 
-def eval_monst3r_gs_poses(seq, output_dir):
+def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None):
     from dust3r.utils.vo_eval import load_traj, eval_metrics, plot_trajectory, save_trajectory_tum_format, process_directory, calculate_averages
     from evo.core.trajectory import PoseTrajectory3D,PosePath3D
 
     monst3r_traj_path  = f'{output_dir}/{seq}/pred_traj.txt'
     refined_traj_path = f'{output_dir}/{seq}/refined_pose.txt'
     gs_traj_path = f'{output_dir}/{seq}/gs_pose.txt'
-    gt_path = f'{output_dir}/{seq}/cam_poses.npy'
-    gt_pose = np.load(gt_path)
+    if gt_pose is None:
+        gt_path = f'{output_dir}/{seq}/cam_poses.npy'
+        gt_pose = np.load(gt_path)
+    else:
+        gt_pose = np.array(gt_pose)
     timestamps_mat = np.arange(gt_pose.shape[0]).astype(float)
 
     # monst3r pose
-    with open(monst3r_traj_path, 'r') as f:
-        monster_pose = f.readlines()
-        monster_pose = np.array([list(map(float,pose.split())) for pose in monster_pose])
-    
-    pose_monster = PosePath3D(
-        positions_xyz=monster_pose[:,1:4],
-        orientations_quat_wxyz=monster_pose[:,4:])
-    traj_monster = PoseTrajectory3D(poses_se3=pose_monster.poses_se3, timestamps=timestamps_mat)
+    if os.path.exists(monst3r_traj_path):
+        with open(monst3r_traj_path, 'r') as f:
+            monster_pose = f.readlines()
+            monster_pose = np.array([list(map(float,pose.split())) for pose in monster_pose])
+        
+        pose_monster = PosePath3D(
+            positions_xyz=monster_pose[:,1:4],
+            orientations_quat_wxyz=monster_pose[:,4:])
+        traj_monster = PoseTrajectory3D(poses_se3=pose_monster.poses_se3, timestamps=timestamps_mat)
     # refined pose
     if os.path.exists(refined_traj_path):
         with open(refined_traj_path, 'r') as f:
@@ -48,7 +52,8 @@ def eval_monst3r_gs_poses(seq, output_dir):
     pose_gt = PosePath3D(poses_se3=gt_pose)
     traj_gt = PoseTrajectory3D(poses_se3=pose_gt.poses_se3, timestamps=timestamps_mat)
 
-    monst3r_ate, monst3r_rpe_trans, monst3r_rpe_rot = eval_metrics(
+    if os.path.exists(monst3r_traj_path):
+        monst3r_ate, monst3r_rpe_trans, monst3r_rpe_rot = eval_metrics(
                 traj_monster, traj_gt, seq=seq, filename=f'{output_dir}/{seq}/monst3r_eval_metric.txt'
             )
     if os.path.exists(refined_traj_path):
@@ -62,9 +67,9 @@ def eval_monst3r_gs_poses(seq, output_dir):
     
     # record the evaluation results in json
     eval_results = {
-        "monst3r_ate": monst3r_ate,
-        "monst3r_rpe_trans": monst3r_rpe_trans,
-        "monst3r_rpe_rot": monst3r_rpe_rot,
+        "monst3r_ate": monst3r_ate if os.path.exists(monst3r_traj_path) else None, 
+        "monst3r_rpe_trans": monst3r_rpe_trans if os.path.exists(monst3r_traj_path) else None,
+        "monst3r_rpe_rot": monst3r_rpe_rot if os.path.exists(monst3r_traj_path) else None,
         "refined_ate": refined_ate if os.path.exists(refined_traj_path) else None,
         "refined_rpe_trans": refined_rpe_trans if os.path.exists(refined_traj_path) else None,
         "refined_rpe_rot": refined_rpe_rot if os.path.exists(refined_traj_path) else None,
@@ -82,30 +87,36 @@ if __name__ == '__main__':
     ate_overall_monst3r = []
     ate_overall_refined = []
     ate_overall_gs = []
+    rpe_rot_monst3r = []
+    rpe_rot_refined = []
+    rpe_rot_gs = []
+    rpe_trans_monst3r = []
+    rpe_trans_refined = []
+    rpe_trans_gs = []
     for dataset_name in datasets:
-        with open('/scratch/yy561/pointodyssey/point_odyssey/cam_poses_{}_30.pkl'.format(dataset_name), 'rb') as f:
+        # with open('/scratch/yy561/pointodyssey/point_odyssey/cam_poses_{}_30.pkl'.format(dataset_name), 'rb') as f:
+        #     save = pickle.load(f)
+        with open('data/tum/tum_cam_poses_rgbd_dataset_freiburg3_sitting_halfsphere_30_theta0.07.pkl', 'rb') as f:
             save = pickle.load(f)
 
         seq_ind = save['selected_frames']
         gt_cam_poses = save['cam_poses']
-        #     save['dataset'] = dataset_name
-        # save['annotation'] = '{}/{}/anno.npz'.format(data_path, dataset_name)
-        # dataset_name = save['dataset']
-        annotation = np.load(save['annotation'])
-        num_seq = len(seq_ind)
-        output_dir = '/scratch/yy561/monst3r/batch_test_results_0.07/{}'.format(dataset_name)
+
+        # num_seq = len(os.listdir('/scratch/yy561/monst3r/batch_test_results_0.07_puregs/{}'.format(dataset_name)))
+        # output_dir = '/scratch/yy561/monst3r/batch_test_results_0.07_puregs/{}'.format(dataset_name)
+        num_seq = len(os.listdir('/scratch/yy561/monst3r/tum_result'))-1
+        output_dir = '/scratch/yy561/monst3r/tum_result'
         for ind in range(num_seq):
             
             # seq dir 
-            seq_dir = os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]))
+            seq_dir = os.path.join(output_dir, 'seq_{}_{}'.format(seq_ind[ind][0], seq_ind[ind][-1]))
             print("Processing sequence: ",seq_dir)
             if not os.path.exists(seq_dir):
-                # print("skip ", seq_dir, "as not exist")
                 continue # skip if the sequence not exit yet 
 
             # check whether the sequence is already processed
-            if not os.path.exists(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), "scene.glb")):
-                # print("skip ", output_dir, seq_ind[ind][0], seq_ind[ind][-1], "as not processed")
+            if not os.path.exists(os.path.join(output_dir, 'seq_{}_{}'.format(seq_ind[ind][0], seq_ind[ind][-1]), "scene.glb")) and \
+                not os.path.exists(os.path.join(output_dir, 'seq_{}_{}'.format(seq_ind[ind][0], seq_ind[ind][-1]), "gs_pose.txt")):
                 continue
 
             # if not os.path.exists(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), "eval_results_gs_monst3r.json")):
@@ -119,25 +130,32 @@ if __name__ == '__main__':
             # else:
             #     print("skip ", output_dir, seq_ind[ind][0], seq_ind[ind][-1])
             try:
-                eval_monst3r_gs_poses('seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), 
-                            output_dir)
+                eval_monst3r_gs_poses('seq_{}_{}'.format(seq_ind[ind][0], seq_ind[ind][-1]), 
+                            output_dir, gt_pose=gt_cam_poses[ind])
             except Exception as e:
-                np.save(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), 'cam_poses.npy'), np.array(gt_cam_poses[ind]))
-                eval_monst3r_gs_poses('seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), 
-                            output_dir) 
+                # np.save(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), 'cam_poses.npy'), np.array(gt_cam_poses[ind]))
+                eval_monst3r_gs_poses('seq_{}_{}'.format(seq_ind[ind][0], seq_ind[ind][-1]), 
+                            output_dir, gt_pose=gt_cam_poses[ind]) 
 
             
             # collect the overall ATE
 
-            with open(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), "eval_results_gs_monst3r.json"), 'r') as f:
+            with open(os.path.join(output_dir, 'seq_{}_{}'.format(seq_ind[ind][0], seq_ind[ind][-1]), "eval_results_gs_monst3r.json"), 'r') as f:
                 data = json.load(f)
                 ate_overall_monst3r.append(data['monst3r_ate'])
                 ate_overall_refined.append(data['refined_ate'])
                 ate_overall_gs.append(data['gs_ate'])
-            assert ate_overall_monst3r[-1] is not None, breakpoint()
+                rpe_rot_monst3r.append(data['monst3r_rpe_rot'])
+                rpe_rot_refined.append(data['refined_rpe_rot'])
+                rpe_rot_gs.append(data['gs_rpe_rot'])
+                rpe_trans_monst3r.append(data['monst3r_rpe_trans']),
+                rpe_trans_refined.append(data['refined_rpe_trans']),
+                rpe_trans_gs.append(data['gs_rpe_trans'])
+            # assert ate_overall_monst3r[-1] is not None, breakpoint()
 
     # average the overall ATE
-    print("monst3r ate: ", np.mean(ate_overall_monst3r))
+    if not None in ate_overall_monst3r:
+        print("monst3r ate: ", np.mean(ate_overall_monst3r))
     if not None in ate_overall_refined:
         print("refined ate: ", np.mean(ate_overall_refined))
     if not None in ate_overall_gs:
@@ -146,9 +164,17 @@ if __name__ == '__main__':
     # if np.mean(ate_overall_monst3r) is not None and np.mean(ate_overall_refined) is not None:
     with open(os.path.join(os.path.dirname(output_dir), "overall_ate.json"), 'w') as f:
         json.dump({
-            "monst3r_ate": np.mean(ate_overall_monst3r),
+            "monst3r_ate": np.mean(ate_overall_monst3r) if not None in ate_overall_monst3r else None,
             "refined_ate": np.mean(ate_overall_refined) if not None in ate_overall_refined else None,
-            "gs_ate": np.mean(ate_overall_gs) if not None in ate_overall_gs else None
+            "gs_ate": np.mean(ate_overall_gs) if not None in ate_overall_gs else None,
+
+            "monst3r_rpe_rot": np.mean(rpe_rot_monst3r) if not None in rpe_rot_monst3r else None,
+            "refined_rpe_rot": np.mean(rpe_rot_refined) if not None in rpe_rot_refined else None,
+            "gs_rpe_rot": np.mean(rpe_rot_gs) if not None in rpe_rot_gs else None,
+
+            "monst3r_rpe_trans": np.mean(rpe_trans_monst3r) if not None in rpe_trans_monst3r else None,
+            "refined_rpe_trans": np.mean(rpe_trans_refined) if not None in rpe_trans_refined else None,
+            "gs_rpe_trans": np.mean(rpe_trans_gs) if not None in rpe_trans_gs else None
         }, f)
     breakpoint()
     #find where is None

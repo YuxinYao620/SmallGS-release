@@ -352,6 +352,8 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         args.data_dir = args.input_dir
         args.monst3r_dir = f'{args.output_dir}/{seq_name}' 
         args.camera_smoothness_lambda = 1
+        # args.datatype = 'custom'
+        args.datatype = 'monst3r'
 
         runner = Runner(local_rank=args.local_rank, world_rank=args.world_rank, world_size=args.world_size, opt=args)
         # breakpoint()
@@ -627,62 +629,6 @@ def main_demo(tmpdirname, model, device, image_size, server_name, server_port, s
                                     outputs=outmodel)
     demo.launch(share=args.share, server_name=server_name, server_port=server_port)
 
-# def eval_monst3r_gs_poses(args):
-#     import json
-#     from dust3r.utils.vo_eval import load_traj, eval_metrics, plot_trajectory, save_trajectory_tum_format, process_directory, calculate_averages
-#     from evo.core.trajectory import PoseTrajectory3D,PosePath3D
-#     if os.path.isdir(args.input_dir):    # input_dir is a directory of images
-#         input_files = [os.path.join(args.input_dir, fname) for fname in sorted(os.listdir(args.input_dir))]
-#     seq = args.seq_name
-#     monst3r_traj_path  = f'{args.output_dir}/{seq}/pred_traj_before_refine.txt'
-#     refined_traj_path = f'{args.output_dir}/{seq}/refined_pose.txt'
-#     gt_path = f'{args.output_dir}/{args.seq_name}/cam_poses.npy'
-#     gt_pose = np.load(gt_path)
-#     timestamps_mat = np.arange(gt_pose.shape[0]).astype(float)
-
-#     # monst3r pose
-#     with open(monst3r_traj_path, 'r') as f:
-#         monster_pose = f.readlines()
-#         monster_pose = np.array([list(map(float,pose.split())) for pose in monster_pose])
-    
-#     pose_monster = PosePath3D(
-#         positions_xyz=monster_pose[:,1:4],
-#         orientations_quat_wxyz=monster_pose[:,4:])
-#     traj_monster = PoseTrajectory3D(poses_se3=pose_monster.poses_se3, timestamps=timestamps_mat)
-#     # refined pose
-    
-#     with open(refined_traj_path, 'r') as f:
-#         refined_pose = f.readlines()
-#         refined_pose = np.array([list(map(float,pose.split())) for pose in refined_pose])
-#     pose_refined = PosePath3D(
-#         positions_xyz=refined_pose[:,1:4],
-#         orientations_quat_wxyz=refined_pose[:,4:])
-#     traj_refined = PoseTrajectory3D(poses_se3=pose_refined.poses_se3, timestamps=timestamps_mat)
-    
-#     pose_gt = PosePath3D(poses_se3=gt_pose)
-#     traj_gt = PoseTrajectory3D(poses_se3=pose_gt.poses_se3, timestamps=timestamps_mat)
-
-#     monst3r_ate, monst3r_rpe_trans, monst3r_rpe_rot = eval_metrics(
-#                 traj_monster, traj_gt, seq=seq, filename=f'{args.output_dir}/{seq}/monst3r_eval_metric.txt'
-#             )
-#     print(f"Monst3r ATE: {monst3r_ate}, Monst3r RPE Trans: {monst3r_rpe_trans}, Monst3r RPE Rot: {monst3r_rpe_rot}")
-
-#     refined_ate, refined_rpe_trans, refined_rpe_rot = eval_metrics(
-#                 traj_refined, traj_gt, seq=seq, filename=f'{args.output_dir}/{seq}/refined_eval_metric.txt'
-#             )
-#     print(f"Refined ATE: {refined_ate}, Refined RPE Trans: {refined_rpe_trans}, Refined RPE Rot: {refined_rpe_rot}")
-
-#     # record the evaluation results in json
-#     eval_results = {
-#         "monst3r_ate": monst3r_ate,
-#         "monst3r_rpe_trans": monst3r_rpe_trans,
-#         "monst3r_rpe_rot": monst3r_rpe_rot,
-#         "refined_ate": refined_ate,
-#         "refined_rpe_trans": refined_rpe_trans,
-#         "refined_rpe_rot": refined_rpe_rot
-#     }
-#     json.dump(eval_results, open(f'{args.output_dir}/{seq}/eval_results_gs_monst3r.json', 'w'))
-
 if __name__ == '__main__':
     parser = get_args_parser()
     args = parser.parse_args()
@@ -709,13 +655,58 @@ if __name__ == '__main__':
 
     if not args.silent:
         print('Outputting stuff in', tmpdirname)
-    if args.eval_only:
-        # eval_monst3r_gs_poses(args)
-        print("go to batch_eval_camera.py")
 
-    elif args.input_dir is not None:
+    if args.input_dir is not None:
+        if "pkl" in args.input_dir:   # input_dir is a metadata file
+            import pickle
+            with open(args.input_dir, 'rb') as f:
+                meta = pickle.load(f)
+            # loop every index list of meta
+            seq_ind = meta['selected_frames']
+            cam_poses = meta['cam_poses']
+            dataset_names = meta['dataset']
+            deataset_paths = meta['dataset_path']
+            image_paths = meta['image_paths']
+
+            for i, ind in enumerate(seq_ind):
+                input_files = image_paths[i]
+                start_idx =ind[0]
+                end_idx = ind[-1]
+                args.seq_name = f"seq_{start_idx}_{end_idx}"
+                args.input_dir = input_files
+
+                recon_fun = functools.partial(get_reconstructed_scene, args, tmpdirname, model, args.device, args.silent, args.image_size)
+                scene, outfile, imgs = recon_fun(
+                    filelist=input_files,
+                    schedule='linear',
+                    niter=300,
+                    min_conf_thr=1.1,
+                    as_pointcloud=True,
+                    mask_sky=False,
+                    clean_depth=True,
+                    transparent_cams=False,
+                    cam_size=0.05,
+                    show_cam=True,
+                    scenegraph_type='swinstride',
+                    winsize=5,
+                    refid=0,
+                    seq_name=args.seq_name,
+                    new_model_weights=args.weights,
+                    temporal_smoothing_weight=0.01,
+                    translation_weight='1.0',
+                    shared_focal=True,
+                    flow_loss_weight=0.01,
+                    flow_loss_start_iter=0.1,
+                    flow_loss_threshold=25,
+                    use_gt_mask=args.use_gt_davis_masks,
+                    fps=args.fps,
+                    num_frames=args.num_frames,
+                )
+            # 
+            
+
         # Process images in the input directory with default parameters
-        if os.path.isdir(args.input_dir):    # input_dir is a directory of images
+        elif os.path.isdir(args.input_dir):    # input_dir is a directory of images
             input_files = [os.path.join(args.input_dir, fname) for fname in sorted(os.listdir(args.input_dir))]
         else:   # input_dir is a video
             input_files = [args.input_dir]

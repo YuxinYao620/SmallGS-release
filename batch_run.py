@@ -8,6 +8,8 @@ import argparse
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser_url = parser.add_mutually_exclusive_group()
+    parser_url.add_argument("--monst3r", default=True,action='store_true', default=False,
+                            help="run monst3r")
     parser.add_argument("--gs_pose", action='store_true', default=False,
                             help="use gs estimated camera poses")
 
@@ -67,13 +69,13 @@ if __name__ == '__main__':
                     subprocess.run(cmd, shell=True)
 
             
-            if not os.path.exists(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), "scene.glb")):
+            if args.monst3r and not os.path.exists(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), "scene.glb")):
             # Construct the command
                 cmd = 'python demo_copy.py'
                 cmd += ' --input {}'.format(seq_dir)
                 cmd += ' --output_dir {}'.format(output_dir)
                 cmd += ' --seq_name {}'.format('seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]))
-                # cmd += ' --gs_pose' if args.gs_pose else ''
+                cmd += ' --gs_refine' if args.gs_refine else ''
                 # cmd += ' --gs_refine' if args.gs_refine else ''
                 # cmd += ' --camera_smoothness_lambda 1'
                 print(cmd)
@@ -81,7 +83,7 @@ if __name__ == '__main__':
                 subprocess.run(cmd, shell=True)
 
             # print("finished processing sequence: ", seq_dir)
-
+            # elif not os.path.exists(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), "eval_results_gs_monst3r.json")):
             if args.gs_refine and not os.path.exists(os.path.join(output_dir, 'seq_{}_{}_gs'.format(seq_ind[ind][0], seq_ind[ind][-1]), "refined_pose.txt")):
                 cmd = 'python demo_copy.py'
                 cmd += ' --input {}'.format(seq_dir)

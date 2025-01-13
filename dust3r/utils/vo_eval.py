@@ -10,7 +10,9 @@ import numpy as np
 from evo.core import sync
 from evo.core.metrics import PoseRelation, Unit
 from evo.core.trajectory import PosePath3D, PoseTrajectory3D
-from evo.tools import file_interface, plot
+# from evo.tools import file_interface, plot
+# from evo.tools import plot
+
 from scipy.spatial.transform import Rotation
 
 
@@ -197,18 +199,32 @@ def eval_metrics(pred_traj, gt_traj=None, seq="", filename="", sample_stride=1):
     delta_list = [1]
     rpe_rots, rpe_transs = [], []
     for delta in delta_list:
-        rpe_rots_result = main_rpe.rpe(
-            traj_ref,
-            traj_est,
-            est_name="traj",
-            pose_relation=PoseRelation.rotation_angle_deg,
-            align=True,
-            correct_scale=True,
-            delta=delta,
-            delta_unit=Unit.frames,
-            rel_delta_tol=0.01,
-            all_pairs=True,
-        )
+        try:
+            rpe_rots_result = main_rpe.rpe(
+                traj_ref,
+                traj_est,
+                est_name="traj",
+                pose_relation=PoseRelation.rotation_angle_deg,
+                align=True,
+                correct_scale=True,
+                delta=delta,
+                delta_unit=Unit.frames,
+                rel_delta_tol=0.01,
+                all_pairs=True,
+            )
+        except:
+            rpe_rots_result = main_rpe.rpe(
+                traj_ref,
+                traj_est,
+                est_name="traj",
+                pose_relation=PoseRelation.rotation_part,
+                align=True,
+                correct_scale=True,
+                delta=delta,
+                delta_unit=Unit.frames,
+                rel_delta_tol=0.01,
+                all_pairs=True,
+            )
 
         rot = rpe_rots_result.stats["rmse"]
         rpe_rots.append(rot)
