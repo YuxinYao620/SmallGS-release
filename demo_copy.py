@@ -161,7 +161,7 @@ def get_args_parser():
     parser.add_argument("--gs_camera", type=str, help="camera pose estimated by gaussian splatting")
     parser.add_argument("--gs_refine", action='store_true', default=False, help="whether use gaussian splatting to refine camera poses")
     parser.add_argument("--gs_pose", action='store_true', help="purely use gs for pose estimation")
-    
+    parser.add_argument("--monst3r_camera", action='store_true', help="use monst3r to estimate camera poses")
     #eval options
     parser.add_argument("--eval_only", action='store_true', default=False, help="only evaluate the model")
     return parser
@@ -195,7 +195,50 @@ def get_3D_model_from_scene(outdir, silent, scene, min_conf_thr=3, as_pointcloud
                                         transparent_cams=transparent_cams, cam_size=cam_size, show_cam=show_cam, silent=silent, save_name=save_name,
                                         cam_color=cam_color)
 
-
+def intermediate_pcds(pairs, output, imgs, args):
+    """
+    get intermediate point clouds from the output
+    """
+    start_frame = 1
+    end_frame = len(imgs)
+    batch_ind = []
+    data_block = []
+    for current_frame in range(start_frame, end_frame, args.batch_size):
+        block_end = min(current_frame + args.batch_size, end_frame)
+        for i in range(current_frame-1, block_end):
+            data_block.append(i)
+        batch_ind.append([data_block[0], data_block[-1]])
+        data_block = []
+    gs_use_pts = {}
+    gs_use_colors = {}
+    batch_ind = np.array(batch_ind)
+    # extract all pairs of ind
+    pair_ind = []
+    for i, (view1, view2) in enumerate(pairs):
+        pair_ind.append([i, view1['idx'], view2['idx']])
+    
+    for ind in batch_ind[:,0]:
+        max_ind = ind
+        mark_i = 0
+        for i, ind1,ind2 in pair_ind:
+            if ind1 == ind:
+                if abs(ind2-ind) > abs(max_ind - ind):
+                    max_ind = ind2
+                    mark_i = i
+            if ind2 == ind:
+                if abs(ind1-ind) > abs(max_ind - ind):
+                    max_ind = ind1
+                    mark_i = i
+        pred1 = output['pred1']['pts3d'][mark_i]
+        # gs_use_pts.append(pred1)
+        # gs_use_colors.append(output['view1']['img'][mark_i])
+        gs_use_pts[ind] = pred1
+        gs_use_colors[ind] = output['view1']['img'][mark_i]
+            
+        # ind1, ind2 = view1['idx'], view2['idx']
+        # if [ind1, ind2] in batch_ind:
+        #     pred1, pred2 = output[i]['pred1'], output[i]['pred2']
+    return gs_use_pts, gs_use_colors
 def get_reconstructed_scene(args, outdir, model, device, silent, image_size, filelist, schedule, niter, min_conf_thr,
                             as_pointcloud, mask_sky, clean_depth, transparent_cams, cam_size, show_cam, scenegraph_type, winsize, refid, 
                             seq_name, new_model_weights, temporal_smoothing_weight, translation_weight, shared_focal, 
@@ -229,6 +272,11 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
     if not args.gs_pose:
         pairs = make_pairs(imgs, scene_graph=scenegraph_type, prefilter=None, symmetrize=True)
         output = inference(pairs, model, device, batch_size=batch_size, verbose=not silent)
+        if args.gs_refine:
+            gs_use_pts, gs_use_colors = intermediate_pcds(pairs, output, imgs,args)
+        # if args.gs_refine and os.path.exists(os.path.join(args.output_dir, seq_name, "scene.glb")):
+        #     pass
+        # else:
         if len(imgs) > 2:
             mode = GlobalAlignerMode.PointCloudOptimizer  
             scene = global_aligner(output, device=device, mode=mode, verbose=not silent, shared_focal = shared_focal, temporal_smoothing_weight=temporal_smoothing_weight, translation_weight=translation_weight,
@@ -237,9 +285,6 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         else:
             mode = GlobalAlignerMode.PairViewer
             scene = global_aligner(output, device=device, mode=mode, verbose=not silent)
-
-        # !! use gaussian splatting's camera pose here 
-        # or use gaussian splatting to refine camera poses here 
 
         lr = 0.01
 
@@ -284,7 +329,6 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         save_folder = f'{args.output_dir}/{seq_name}'  #default is 'demo_tmp/NULL'
         os.makedirs(save_folder, exist_ok=True)
 
-        # breakpoint()
         outfile = get_3D_model_from_scene(save_folder, silent, scene, min_conf_thr, as_pointcloud, mask_sky,
                                 clean_depth, transparent_cams, cam_size, show_cam)
 
@@ -352,11 +396,10 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         args.data_dir = args.input_dir
         args.monst3r_dir = f'{args.output_dir}/{seq_name}' 
         args.camera_smoothness_lambda = 1
-        # args.datatype = 'custom'
-        args.datatype = 'monst3r'
+        args.datatype = 'custom'
+        # args.datatype = 'monst3r'
 
         runner = Runner(local_rank=args.local_rank, world_rank=args.world_rank, world_size=args.world_size, opt=args)
-        # breakpoint()
 
         gs_pose = runner.train()['global_cam_poses_est']
         # transform back
@@ -453,9 +496,9 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
     
 
         runner = Runner(local_rank=args.local_rank, world_rank=args.world_rank, world_size=args.world_size, opt=args)
-        # breakpoint()
 
-        refined_pose = runner.train()['global_cam_poses_est']
+        refined_pose = runner.train(monst3r_pointmap = gs_use_pts, monst3r_pointcolor = gs_use_colors)['global_cam_poses_est']
+        # refined_pose = runner.train()['global_cam_poses_est']
         # transform back
         refined_pose = torch.cat([torch.Tensor(pose).unsqueeze(0) for pose in refined_pose], dim=0)
         refined_pose = refined_pose @ torch.inverse(T)
@@ -659,50 +702,55 @@ if __name__ == '__main__':
     if args.input_dir is not None:
         if "pkl" in args.input_dir:   # input_dir is a metadata file
             import pickle
-            with open(args.input_dir, 'rb') as f:
-                meta = pickle.load(f)
-            # loop every index list of meta
-            seq_ind = meta['selected_frames']
-            cam_poses = meta['cam_poses']
-            dataset_names = meta['dataset']
-            deataset_paths = meta['dataset_path']
-            image_paths = meta['image_paths']
+            # find parent dir 
+            parent_dir = os.path.dirname(args.input_dir)
+            pkl_paths = [os.path.join(parent_dir, f) for f in os.listdir(parent_dir) if f.endswith('.pkl')]
+            for pkl_path in pkl_paths:
+                # with open(args.input_dir, 'rb') as f:
+                with open(pkl_path, 'rb') as f:
+                    meta = pickle.load(f)
+                # loop every index list of meta
+                seq_ind = meta['selected_frames']
+                cam_poses = meta['cam_poses']
+                dataset_names = meta['dataset']
+                deataset_paths = meta['dataset_path']
+                image_paths = meta['image_paths']
 
-            for i, ind in enumerate(seq_ind):
-                input_files = image_paths[i]
-                start_idx =ind[0]
-                end_idx = ind[-1]
-                args.seq_name = f"seq_{start_idx}_{end_idx}"
-                args.input_dir = input_files
+                for i, ind in enumerate(seq_ind):
+                    input_files = image_paths[i]
+                    start_idx =ind[0]
+                    end_idx = ind[-1]
+                    args.seq_name = f"seq_{start_idx}_{end_idx}"
+                    args.input_dir = input_files
 
-                recon_fun = functools.partial(get_reconstructed_scene, args, tmpdirname, model, args.device, args.silent, args.image_size)
-                scene, outfile, imgs = recon_fun(
-                    filelist=input_files,
-                    schedule='linear',
-                    niter=300,
-                    min_conf_thr=1.1,
-                    as_pointcloud=True,
-                    mask_sky=False,
-                    clean_depth=True,
-                    transparent_cams=False,
-                    cam_size=0.05,
-                    show_cam=True,
-                    scenegraph_type='swinstride',
-                    winsize=5,
-                    refid=0,
-                    seq_name=args.seq_name,
-                    new_model_weights=args.weights,
-                    temporal_smoothing_weight=0.01,
-                    translation_weight='1.0',
-                    shared_focal=True,
-                    flow_loss_weight=0.01,
-                    flow_loss_start_iter=0.1,
-                    flow_loss_threshold=25,
-                    use_gt_mask=args.use_gt_davis_masks,
-                    fps=args.fps,
-                    num_frames=args.num_frames,
-                )
-            # 
+                    recon_fun = functools.partial(get_reconstructed_scene, args, tmpdirname, model, args.device, args.silent, args.image_size)
+                    scene, outfile, imgs = recon_fun(
+                        filelist=input_files,
+                        schedule='linear',
+                        niter=300,
+                        min_conf_thr=1.1,
+                        as_pointcloud=True,
+                        mask_sky=False,
+                        clean_depth=True,
+                        transparent_cams=False,
+                        cam_size=0.05,
+                        show_cam=True,
+                        scenegraph_type='swinstride',
+                        winsize=5,
+                        refid=0,
+                        seq_name=args.seq_name,
+                        new_model_weights=args.weights,
+                        temporal_smoothing_weight=0.01,
+                        translation_weight='1.0',
+                        shared_focal=True,
+                        flow_loss_weight=0.01,
+                        flow_loss_start_iter=0.1,
+                        flow_loss_threshold=25,
+                        use_gt_mask=args.use_gt_davis_masks,
+                        fps=args.fps,
+                        num_frames=args.num_frames,
+                    )
+                # 
             
 
         # Process images in the input directory with default parameters

@@ -346,7 +346,6 @@ class Runner:
 
         # Tensorboard
         self.writer = SummaryWriter(log_dir=f"{opt.workspace}/tb")
-
         # Load data: Training data should contain initial points and colors.
         self.parser = Parser(
             data_dir=opt.data_dir,
@@ -780,8 +779,11 @@ class Runner:
                 # loss += depthloss
 
             if self.opt.camera_smoothness_loss and camera_opt:
-                smoothness_loss = self.calculate_speed_smoothness(camtoworlds_transformed)
-                # smoothness_loss = self.monst3r_camera_smoothness(camtoworlds_transformed)
+                if self.opt.monst3r_camera:
+                    smoothness_loss = self.monst3r_camera_smoothness(camtoworlds_transformed)
+                else:
+                    smoothness_loss = self.calculate_speed_smoothness(camtoworlds_transformed)
+                
                 loss += (1- step/max_steps_local)*self.opt.camera_smoothness_lambda * smoothness_loss
             desc = f"loss={loss.item():.3f}| " f"sh degree={sh_degree_to_use}| "
             # if opt.depth_loss:
@@ -881,7 +883,7 @@ class Runner:
                     num_epochs=max_steps)
         return doma, doma_optimizer, doma_scheduler
 
-    def train(self):
+    def train(self, monst3r_pointmap = None, monst3r_pointcolor = None):
         opt = self.opt
         device = self.device
         world_rank = self.world_rank
@@ -927,9 +929,12 @@ class Runner:
                 data_block.append(self.trainset[i])
         
             # reinitalize the optimizer and gsplats
-
-            depth = data_block[0]['depth'].to(device)
-            rgb = data_block[0]['image'].reshape(-1, 3).to(device) / 255.0 
+            if monst3r_pointcolor is not None:
+                depth = monst3r_pointmap[current_frame-1].reshape(-1, 3).to(device)
+                rgb = monst3r_pointcolor[current_frame-1].reshape(-1, 3).to(device)
+            else:
+                depth = data_block[0]['depth'].to(device)
+                rgb = data_block[0]['image'].reshape(-1, 3).to(device) / 255.0 
 
             if opt.semantics_opt:
                 semantics_masks = torch.stack([data["mask"] for data in data_block]).to(device)

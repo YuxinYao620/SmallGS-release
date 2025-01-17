@@ -518,7 +518,8 @@ class Parser:
             self.transform = np.eye(4)
             # no distortion
         elif type == "custom":
-            if data_dir is not list:
+            # if data_dir is not list:
+            if not isinstance(data_dir, list):
                 data_info = data_dir.split('/')
                 seq_name = data_info[-1]
                 image_names = [name for name in sorted(os.listdir(os.path.join(data_dir)))]
@@ -526,12 +527,20 @@ class Parser:
                 # find one image to get the size
                 image = imageio.imread(os.path.join(data_dir,image_names[0]))[..., :3]
             else:
-                data_dir = os.path.dirname(data_dir[0])
-                data_info = data_dir.split('/')
+                data_info = data_dir[0].split('/')
                 seq_name = data_info[-1]
-                image_names = [name.split('/')[-1] for name in image_names]
-                seq_len = len(image_names)
+                image_names = [name.split('/')[-1] for name in data_dir]
+                seq_len = len(data_dir)
                 image = imageio.imread(data_dir[0])[..., :3]
+                data_dir = os.path.dirname(data_dir[0])
+
+            # else:
+            #     data_dir = os.path.dirname(data_dir[0])
+            #     data_info = data_dir.split('/')
+            #     seq_name = data_info[-1]
+            #     image_names = [name.split('/')[-1] for name in image_names]
+            #     seq_len = len(image_names)
+            #     image = imageio.imread(data_dir[0])[..., :3]
             # image_names = [name for name in sorted(os.listdir(os.path.join(data_dir)),key = lambda x: int(x.split(".")[-2].split("_")[-1]))]
 
             height, width = image.shape[:2]

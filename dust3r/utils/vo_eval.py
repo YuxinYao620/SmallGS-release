@@ -183,14 +183,13 @@ def eval_metrics(pred_traj, gt_traj=None, seq="", filename="", sample_stride=1):
     # ATE
     traj_ref = gt_traj
     traj_est = pred_traj
-
     ate_result = main_ape.ape(
         traj_ref,
         traj_est,
         est_name="traj",
         pose_relation=PoseRelation.translation_part,
         align=True,
-        correct_scale=True,
+        correct_scale=True
     )
 
     ate = ate_result.stats["rmse"]

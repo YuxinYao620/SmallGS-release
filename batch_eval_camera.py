@@ -4,6 +4,7 @@ import numpy as np
 import os 
 import time
 import json
+import glob
 
 def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None):
     from dust3r.utils.vo_eval import load_traj, eval_metrics, plot_trajectory, save_trajectory_tum_format, process_directory, calculate_averages
@@ -79,7 +80,17 @@ def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None):
     }
     json.dump(eval_results, open(f'{output_dir}/{seq}/eval_results_gs_monst3r.json', 'w'))
 
+def argparse():
+    import argparse
+    parser = argparse.ArgumentParser(description='Evaluate the camera poses')
+    parser.add_argument('--seq', type=str, default=None, help='sequence name')
+    parser.add_argument('--output_dir', type=str, default='/scratch/yy561/monst3r/batch_test_results', help='output directory')
+    parser.add_argument('--save_dir', type=str, default='/scratch/yy561/monst3r/batch_test', help='save directory')
+    return parser.parse_args()
+
 if __name__ == '__main__':
+    args = argparse()
+
     # Load the data
     # datasets =['scene_d78_ego1', 'r1_new_f', 'ani1_new_f', 'r1_new_', 'ani10_new_f', 'ani14_new_f', 'scene_d78_ego2', 'scene_d78_3rd', 'ani16_new_', 'ani3_new_', 'ani1_new_']
     datasets = [l for l in os.listdir('/scratch/yy561/pointodyssey/val/') if os.path.isdir(os.path.join('/scratch/yy561/pointodyssey/val/', l))]
@@ -93,20 +104,37 @@ if __name__ == '__main__':
     rpe_trans_monst3r = []
     rpe_trans_refined = []
     rpe_trans_gs = []
-    for dataset_name in datasets:
+    # for dataset_name in datasets:
+
+    if "pkl" in args.save_dir:   # input_dir is a metadata file
+        import pickle
+        # find parent dir 
+        parent_dir = os.path.dirname(args.save_dir)
+        pkl_paths = [os.path.join(parent_dir, f) for f in os.listdir(parent_dir) if f.endswith('.pkl')]
+
+    for pkl_path in pkl_paths:
         # with open('/scratch/yy561/pointodyssey/point_odyssey/cam_poses_{}_30.pkl'.format(dataset_name), 'rb') as f:
         #     save = pickle.load(f)
-        with open('data/tum/tum_cam_poses_rgbd_dataset_freiburg3_sitting_halfsphere_30_theta0.07.pkl', 'rb') as f:
+        with open(pkl_path, 'rb') as f:
             save = pickle.load(f)
+        # if args.save_dir is not None:
+        #     with open(os.path.join(args.save_dir), 'rb') as f:
+        #         save = pickle.load(f)
+
 
         seq_ind = save['selected_frames']
         gt_cam_poses = save['cam_poses']
 
         # num_seq = len(os.listdir('/scratch/yy561/monst3r/batch_test_results_0.07_puregs/{}'.format(dataset_name)))
         # output_dir = '/scratch/yy561/monst3r/batch_test_results_0.07_puregs/{}'.format(dataset_name)
-        num_seq = len(os.listdir('/scratch/yy561/monst3r/tum_result'))-1
-        output_dir = '/scratch/yy561/monst3r/tum_result'
-        for ind in range(num_seq):
+        num_seq = len(os.listdir('/scratch/yy561/monst3r/tum_result_test'))-1
+        output_dir = '/scratch/yy561/monst3r/tum_result_test'
+        if args.output_dir is not None:
+            output_dir = args.output_dir
+            # num_seq = len(os.listdir(output_dir))
+            num_seq = len(glob.glob(os.path.join(output_dir, 'seq_*')))
+        # for ind in range(num_seq):
+        for ind in range(len(seq_ind)):
             
             # seq dir 
             seq_dir = os.path.join(output_dir, 'seq_{}_{}'.format(seq_ind[ind][0], seq_ind[ind][-1]))
@@ -162,6 +190,7 @@ if __name__ == '__main__':
         print("gs ate: ", np.mean(ate_overall_gs))
 
     # if np.mean(ate_overall_monst3r) is not None and np.mean(ate_overall_refined) is not None:
+    breakpoint()
     with open(os.path.join(os.path.dirname(output_dir), "overall_ate.json"), 'w') as f:
         json.dump({
             "monst3r_ate": np.mean(ate_overall_monst3r) if not None in ate_overall_monst3r else None,
@@ -176,7 +205,6 @@ if __name__ == '__main__':
             "refined_rpe_trans": np.mean(rpe_trans_refined) if not None in rpe_trans_refined else None,
             "gs_rpe_trans": np.mean(rpe_trans_gs) if not None in rpe_trans_gs else None
         }, f)
-    breakpoint()
     #find where is None
     np.where(np.array(ate_overall_monst3r) == None)
     # monst3r ate:  0.008998474463947742
