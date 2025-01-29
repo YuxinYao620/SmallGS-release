@@ -365,6 +365,7 @@ class Runner:
             load_canny=opt.canny_opt,
             datatype = opt.datatype,
             # background_color = opt.background_color,
+            dinos = opt.dino,
         )
         self.valset = Dataset(self.parser, split="val")
         self.scene_scale = self.parser.scene_scale * 1.1 * opt.global_scale
@@ -696,7 +697,7 @@ class Runner:
         return pose_loss
         
     def train_block(self, camtoworlds, Ks, width, height, sh_degree_to_use, image_ids, pixels, schedulers, 
-                    camera_scheduler, camera_opt=False, points=None, depthmap_gt=None,eval_final=False,masks=None):
+                    camera_scheduler, camera_opt=False, points=None, depthmap_gt=None,eval_final=False,masks=None, dino = None):
         if eval_final:
             max_steps_local = 1000
         elif not camera_opt:
@@ -790,6 +791,11 @@ class Runner:
             #     desc += f"depth loss={depthloss.item():.6f}| "
             # if self.opt.camera_smoothness_loss and camera_opt:
             #     desc += f"smoothness loss={smoothness_loss.item():.6f}| "
+            if dino is not None:
+                dino_emb = self.trainset.get_dino_emb(colors) # the input require the color to be in 0,255, image shape H,W,3
+                dino_gt = dino_emb[image_ids]
+
+                
 
             pbar.set_description(desc)
             loss.backward()
@@ -937,6 +943,7 @@ class Runner:
                 rgb = data_block[0]['image'].reshape(-1, 3).to(device) / 255.0 
 
             if opt.semantics_opt:
+                breakpoint()
                 semantics_masks = torch.stack([data["mask"] for data in data_block]).to(device)
                 depth = depth[semantics_masks[0].view(-1)]
                 rgb = rgb[semantics_masks[0].view(-1)]
@@ -1019,7 +1026,8 @@ class Runner:
             depthmap_gt = torch.stack([data["depth_map"] for data in data_block]).to(device)  # [b, M]
             if opt.pose_noise:
                 camtoworlds = self.pose_perturb(camtoworlds, image_ids)
-                
+            if opt.dino:
+                dino_gt = torch.stack([data["dino_gt"] for data in data_block]).to(device)                
 
             if opt.save_sem_mask:
                 for ind, pixel in enumerate(pixels):
@@ -1047,16 +1055,19 @@ class Runner:
 
             # train first frame
             renders_0, alphas_0, info_0, loss = self.train_block(camtoworlds[[0]], Ks[[0]], width, height, sh_degree_to_use, image_ids[[0]], pixels[[0]],
-                                                                    schedulers,camera_schedulers,camera_opt = False,depthmap_gt=depthmap_gt[[0]],masks=None) 
+                                                                    schedulers,camera_schedulers,camera_opt = False,depthmap_gt=depthmap_gt[[0]],masks=None,
+                                                                    dino = dino_gt[[0]] if opt.dino else None) 
 
             # fix the first frame and train the rest
             if current_frame != end_frame:
                 if self.opt.semantics_opt:
                     renders, alphas, info, loss = self.train_block(camtoworlds[1:], Ks[1:], width, height, sh_degree_to_use, image_ids[1:], pixels[1:],
-                                                                schedulers,camera_schedulers,camera_opt = True,depthmap_gt=depthmap_gt[1:],masks=masks[1:])
+                                                                schedulers,camera_schedulers,camera_opt = True,depthmap_gt=depthmap_gt[1:],
+                                                                masks=masks[1:], dino = dino_gt[1:] if opt.dino else None)
                 else:
                     renders, alphas, info, loss = self.train_block(camtoworlds[1:], Ks[1:], width, height, sh_degree_to_use, image_ids[1:], pixels[1:],
-                                                                schedulers,camera_schedulers,camera_opt = True,depthmap_gt=depthmap_gt[1:],masks=None)
+                                                                schedulers,camera_schedulers,camera_opt = True,depthmap_gt=depthmap_gt[1:],
+                                                                masks=None, dino = dino_gt[1:] if opt.dino else None)
 
                 print('camera optimization result')
                 # current camera pose with optimization

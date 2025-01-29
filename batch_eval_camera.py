@@ -191,7 +191,7 @@ if __name__ == '__main__':
 
     # if np.mean(ate_overall_monst3r) is not None and np.mean(ate_overall_refined) is not None:
     breakpoint()
-    with open(os.path.join(os.path.dirname(output_dir), "overall_ate.json"), 'w') as f:
+    with open(os.path.join(output_dir, "overall_ate.json"), 'w') as f:
         json.dump({
             "monst3r_ate": np.mean(ate_overall_monst3r) if not None in ate_overall_monst3r else None,
             "refined_ate": np.mean(ate_overall_refined) if not None in ate_overall_refined else None,

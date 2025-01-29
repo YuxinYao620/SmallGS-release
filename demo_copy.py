@@ -26,6 +26,7 @@ from pathlib import Path
 from evo.core.trajectory import PoseTrajectory3D,PosePath3D
 import copy
 
+import pickle
 
 from scipy.spatial.transform import Rotation
 pl.ion()
@@ -162,8 +163,11 @@ def get_args_parser():
     parser.add_argument("--gs_refine", action='store_true', default=False, help="whether use gaussian splatting to refine camera poses")
     parser.add_argument("--gs_pose", action='store_true', help="purely use gs for pose estimation")
     parser.add_argument("--monst3r_camera", action='store_true', help="use monst3r to estimate camera poses")
+    parser.add_argument("--use_monst3r_intermediate", action='store_true', help="monst3r intermediate pointmaps")
     #eval options
     parser.add_argument("--eval_only", action='store_true', default=False, help="only evaluate the model")
+
+    parser.add_argument("--dino", action='store_true', default=False, help="use dino model")
     return parser
 
 def get_3D_model_from_scene(outdir, silent, scene, min_conf_thr=3, as_pointcloud=False, mask_sky=False,
@@ -391,6 +395,11 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         # delete the results to clear the memory
 
     if args.gs_pose:
+        
+        if args.use_monst3r_intermediate:
+            pairs = make_pairs(imgs, scene_graph=scenegraph_type, prefilter=None, symmetrize=True)
+            output = inference(pairs, model, device, batch_size=batch_size, verbose=not silent)
+            gs_use_pts, gs_use_colors = intermediate_pcds(pairs, output, imgs,args)
         print('using gaussian splatting to estimate camera poses, not refine!')
         args.workspace = f'{args.output_dir}/{seq_name}' 
         args.data_dir = args.input_dir
@@ -400,8 +409,12 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         # args.datatype = 'monst3r'
 
         runner = Runner(local_rank=args.local_rank, world_rank=args.world_rank, world_size=args.world_size, opt=args)
-
-        gs_pose = runner.train()['global_cam_poses_est']
+        
+        if args.use_monst3r_intermediate:
+            print('using monst3r intermediate pointmaps')
+            gs_pose = runner.train(monst3r_pointmap = gs_use_pts, monst3r_pointcolor = gs_use_colors)['global_cam_poses_est']
+        else:
+            gs_pose = runner.train()['global_cam_poses_est']
         # transform back
         gs_pose = torch.cat([torch.Tensor(pose).unsqueeze(0) for pose in gs_pose], dim=0)
         gs_pose_R = gs_pose[:,:3, :3]
@@ -497,7 +510,11 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
 
         runner = Runner(local_rank=args.local_rank, world_rank=args.world_rank, world_size=args.world_size, opt=args)
 
-        refined_pose = runner.train(monst3r_pointmap = gs_use_pts, monst3r_pointcolor = gs_use_colors)['global_cam_poses_est']
+        if args.use_monst3r_intermediate:
+            print('use monst3r intermediate pointmaps')
+            refined_pose = runner.train(monst3r_pointmap = gs_use_pts, monst3r_pointcolor = gs_use_colors)['global_cam_poses_est']
+        else:
+            refined_pose = runner.train()['global_cam_poses_est']
         # refined_pose = runner.train()['global_cam_poses_est']
         # transform back
         refined_pose = torch.cat([torch.Tensor(pose).unsqueeze(0) for pose in refined_pose], dim=0)
@@ -700,11 +717,12 @@ if __name__ == '__main__':
         print('Outputting stuff in', tmpdirname)
 
     if args.input_dir is not None:
-        if "pkl" in args.input_dir:   # input_dir is a metadata file
-            import pickle
+        # if "pkl" in args.input_dir:   # input_dir is a metadata file
+        if 'meta' in args.input_dir:
             # find parent dir 
-            parent_dir = os.path.dirname(args.input_dir)
-            pkl_paths = [os.path.join(parent_dir, f) for f in os.listdir(parent_dir) if f.endswith('.pkl')]
+            # parent_dir = os.path.dirname(args.input_dir)
+
+            pkl_paths = [os.path.join(args.input_dir, f) for f in os.listdir(args.input_dir) if f.endswith('.pkl')]
             for pkl_path in pkl_paths:
                 # with open(args.input_dir, 'rb') as f:
                 with open(pkl_path, 'rb') as f:
@@ -751,7 +769,50 @@ if __name__ == '__main__':
                         num_frames=args.num_frames,
                     )
                 # 
-            
+        elif 'pkl' in args.input_dir:
+            with open(args.input_dir, 'rb') as f:
+                pkl = pickle.load(f)
+            # loop every index list of meta
+            seq_ind = pkl['selected_frames']
+            cam_poses = pkl['cam_poses']
+            dataset_names = pkl['dataset']
+            deataset_paths = pkl['dataset_path']
+            image_paths = pkl['image_paths']
+
+            for i, ind in enumerate(seq_ind):
+                input_files = image_paths[i]
+                start_idx =ind[0]
+                end_idx = ind[-1]
+                args.seq_name = f"seq_{start_idx}_{end_idx}"
+                args.input_dir = input_files
+
+                recon_fun = functools.partial(get_reconstructed_scene, args, tmpdirname, model, args.device, args.silent, args.image_size)
+                scene, outfile, imgs = recon_fun(
+                    filelist=input_files,
+                    schedule='linear',
+                    niter=300,
+                    min_conf_thr=1.1,
+                    as_pointcloud=True,
+                    mask_sky=False,
+                    clean_depth=True,
+                    transparent_cams=False,
+                    cam_size=0.05,
+                    show_cam=True,
+                    scenegraph_type='swinstride',
+                    winsize=5,
+                    refid=0,
+                    seq_name=args.seq_name,
+                    new_model_weights=args.weights,
+                    temporal_smoothing_weight=0.01,
+                    translation_weight='1.0',
+                    shared_focal=True,
+                    flow_loss_weight=0.01,
+                    flow_loss_start_iter=0.1,
+                    flow_loss_threshold=25,
+                    use_gt_mask=args.use_gt_davis_masks,
+                    fps=args.fps,
+                    num_frames=args.num_frames,
+                )
 
         # Process images in the input directory with default parameters
         elif os.path.isdir(args.input_dir):    # input_dir is a directory of images

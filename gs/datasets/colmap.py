@@ -34,6 +34,12 @@ import copy
 
 import joblib
 import glob
+
+from typing import Sequence
+from torchvision import transforms
+IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
+IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
+
 def cartesian_to_spherical_batch(coords, target_point = None):
     """
     Convert a batch of Cartesian coordinates to spherical coordinates.
@@ -684,6 +690,7 @@ class Dataset:
         load_canny: bool = False,
         # background_color = None
         datatype = "custom",
+        dino = False
     ):
         self.parser = parser
         self.split = split
@@ -702,6 +709,7 @@ class Dataset:
         self.depthmap_list = OrderedDict()
         self.camtoworlds_gt = None
         self.datatype = datatype
+        self.dino = dino
         # self.background_color = background_color
 
         # check whether depth map is already generated
@@ -725,6 +733,14 @@ class Dataset:
             breakpoint()
         if self.split == "val":
             self.indices = self.indices[:: self.parser.test_every]
+        if self.dino:
+            backbone_name= f"dinov2_vits14"
+            torch.hub.set_dir("/scratch/yy561/.cache/hub")
+            backbone_model = torch.hub.load(repo_or_dir="facebookresearch/dinov2", model=backbone_name, )
+            backbone_model.eval()
+            backbone_model.cuda()
+            self.dino_model = backbone_model
+            
 
     def __len__(self):
         return len(self.indices)
@@ -741,6 +757,34 @@ class Dataset:
     # def get_random_views(self, ):
     def set_camera_to_world(self, camtoworlds):
         self.camto_world = camtoworlds
+
+    def make_normalize_transform(self,
+        mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
+        std: Sequence[float] = IMAGENET_DEFAULT_STD,
+    ) -> transforms.Normalize:
+        return transforms.Normalize(mean=mean, std=std)
+
+    def make_classification_eval_transform(self,
+        *,
+        resize_size: int = 256,
+        interpolation=transforms.InterpolationMode.BICUBIC,
+        crop_size: int = 224,
+        mean: Sequence[float] = IMAGENET_DEFAULT_MEAN,
+        std: Sequence[float] = IMAGENET_DEFAULT_STD,
+    ) -> transforms.Compose:
+        transforms_list = [
+            transforms.Resize(resize_size, interpolation=interpolation),
+            transforms.CenterCrop(crop_size),
+            self.make_normalize_transform(mean=mean, std=std),
+        ]
+        return transforms.Compose(transforms_list)
+    def get_dino_features(self, image):
+        transform = self.make_classification_eval_transform()
+        test_image = torch.Tensor(image).permute(2, 0, 1).float() / 255.0
+        test_image = transform(test_image)
+        embeddings = self.dino_model(test_image.unsqueeze(0).cuda())
+        return embeddings
+
 
     def __getitem__(self, item: int) -> Dict[str, Any]:
         if item not in self.gt_image_indices:
@@ -927,6 +971,7 @@ class Dataset:
                     mask = F.interpolate(mask.unsqueeze(0).float(), 
                                         size=(image.shape[0], image.shape[1]), mode='nearest').squeeze().bool()
                     assert mask.shape == image.shape[:2], f"Mask shape {mask.shape} does not match image shape {image.shape[:2]}"
+                breakpoint()
                 mask = mask.view(image.shape[0], image.shape[1],1)
             elif self.load_semantics and self.datatype == "monst3r":
                 assert os.path.exists(self.parser.semantic_path + f"/dynamic_mask_{index}.png")
@@ -939,6 +984,13 @@ class Dataset:
                 mask = ~mask.view(image.shape[0], image.shape[1],1)
             else:
                 mask = None
+
+
+            # dino feature 
+            if self.dino:
+                embeddings = self.get_dino_features(image)
+            else:
+                embeddings = None
             data = {
                 "K": torch.from_numpy(K).float().to(self.device),
                 "camtoworld_gt": torch.from_numpy(camtoworlds_gt).float().to(self.device) if self.datatype != "monst3r" else torch.Tensor(camtoworlds_gt),
@@ -953,6 +1005,7 @@ class Dataset:
                 # "mask": mask.to(self.device) if mask is not None else torch.zeros(image.shape[0], image.shape[1],1).bool().to(self.device),
                 "generated" : False,
                 # "alpha": alpha.to(self.device) if alpha is not None else None
+                "dino_embeddings": embeddings.to(self.device) if embeddings is not None else None
             }
             return data
 
