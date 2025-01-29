@@ -1052,7 +1052,7 @@ class Runner:
             sh_degree_to_use = min(opt.max_steps // opt.sh_degree_interval, opt.sh_degree) 
             if sh_degree_to_use <1:
                 sh_degree_to_use = opt.sh_degree
-
+                
             # train first frame
             renders_0, alphas_0, info_0, loss = self.train_block(camtoworlds[[0]], Ks[[0]], width, height, sh_degree_to_use, image_ids[[0]], pixels[[0]],
                                                                     schedulers,camera_schedulers,camera_opt = False,depthmap_gt=depthmap_gt[[0]],masks=None,
