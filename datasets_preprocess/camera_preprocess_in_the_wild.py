@@ -3,7 +3,8 @@ import os
 import shutil
 import numpy as np
 from scipy.spatial.transform import Rotation as R
-
+from llff_data_utils import batch_parse_llff_poses
+from llff_data_utils import load_llff_data
 def read_file_list(filename):
     """
     Reads a trajectory from a text file. 
@@ -59,9 +60,8 @@ def associate(first_list, second_list, offset, max_difference):
     matches.sort()
     return matches
 
-dirs = glob.glob("../data/tum/*/")
+dirs = glob.glob("/scratch/yy561/monst3r/nvidia_data/Nvidia_long/*/")
 dirs = sorted(dirs)
-
 root_dir = "/scratch/yy561/monst3r/"
 
 
@@ -71,37 +71,45 @@ selected_frames_path = []
 cam_poses = []
 save = {"selected_frames":[], "cam_poses":[], "image_paths":[], 'scene_name':[], 'dataset_path':[], "dataset":[]}
 for dir in dirs:
-    if "walking_static" in dir:
+    if "Depths" in dir:
         continue
-    dataset_name = dir.split('/')[-2]
+    name = dir.split("/")[-2]
+    # dir = dir + name + "/dense/"
+    dir = os.path.join(dir, name, "dense")
+    dataset_name = dir.split('/')[-3]
     sliding_window = 30
     continue_flag = True
 
     # extract matched frames
     frames = []
     gt = []
-    first_file = dir + 'rgb.txt'
-    second_file = dir + 'groundtruth.txt'
 
-    first_list = read_file_list(first_file)
-    second_list = read_file_list(second_file)
-    matches = associate(first_list, second_list, 0.0, 0.02)
+    _, poses, bds, _, i_test, rgb_files, _ = load_llff_data(
+        dir,
+        height=288,
+        num_avg_imgs=sliding_window,
+        load_imgs=False,
+    )
+    intrinsics, c2w_mats = batch_parse_llff_poses(poses)
+    h, w = poses[0][:2, -1]
+    render_intrinsics, render_c2w_mats = (
+        intrinsics,
+        c2w_mats,
+    )
 
-    for a,b in matches:
-        frames.append(dir + first_list[a][0])
-        gt.append([b]+second_list[b])
-    
+    frames = rgb_files 
+    cam_exts = render_c2w_mats
     # turn quaternions into rotation matrices
-    cam_exts = []
-    for i in range(len(gt)):
-        # tx ty tz qx qy qz qw
-        q = np.array([float(x) for x in gt[i][4:]])
-        t = np.array([float(x) for x in gt[i][1:4]])
-        cam_ext_i = np.eye(4)
-        cam_ext_i[:3, :3] = R.from_quat(q, scalar_first = False).as_matrix()
-        cam_ext_i[:3, 3] = t
-        cam_exts.append(cam_ext_i)
-    num_frames = len(gt)
+    # cam_exts = []
+    # for i in range(len(gt)):
+    #     # tx ty tz qx qy qz qw
+    #     q = np.array([float(x) for x in gt[i][4:]])
+    #     t = np.array([float(x) for x in gt[i][1:4]])
+    #     cam_ext_i = np.eye(4)
+    #     cam_ext_i[:3, :3] = R.from_quat(q, scalar_first = False).as_matrix()
+    #     cam_ext_i[:3, 3] = t
+    #     cam_exts.append(cam_ext_i)
+    num_frames = len(cam_exts)
     # select camera constrained videos
     while continue_flag:
         # find consecutive frames within camera poses as long as possible
@@ -145,7 +153,7 @@ for dir in dirs:
                     # breakpoint()
                     t_current = cam_exts[i][:3, 3]
                     t_middle = cam_middle[:3, 3]
-                    if np.linalg.norm(t_current - t_middle) > 0.1:
+                    if np.linalg.norm(t_current - t_middle) > 0.01:
                         accept_flag = False
             if accept_flag:
                 max_ind = min(num_frames-1, index + sliding_window//2)
@@ -185,7 +193,7 @@ for dir in dirs:
             save['selected_frames'] += selected_frames
             save['cam_poses'] += cam_poses
             save['image_paths'] += selected_frames_path
-
+            breakpoint()
             print(dir, "\n", "Save Number of frames: ", num_frames, "Sliding window: ", sliding_window, "sequence length: ", len(selected_frames))
             
         
@@ -220,7 +228,5 @@ for dir in dirs:
 # save['dataset_type'] = 'tum'
 print(dir, "\n", "Save Number of frames: ", num_frames, "Sliding window: ", sliding_window)
 import pickle
-print(len(save['selected_frames']))
-breakpoint()
-with open(f"/scratch/yy561/monst3r/data/tum/tum_cam_poses_all_0.07_rest_except_static_walking.pkl", "wb") as f:
+with open(f"/scratch/yy561/monst3r/data/in_the_wild_0.07.pkl", "wb") as f:
     pickle.dump(save, f)

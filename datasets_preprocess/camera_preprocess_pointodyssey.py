@@ -2,116 +2,116 @@ import glob
 import os
 import shutil
 import numpy as np
+
+
+
 from scipy.spatial.transform import Rotation
-sintel_meta ={
-        'img_path': "/scratch/yy561/monst3r/data/sintel/training/final",
-        'anno_path': "/scratch/yy561/monst3r/data/sintel/training/camdata_left",
-        'mask_path': None,
-        'dir_path_func': lambda img_path, seq: os.path.join(img_path, seq),
-        'gt_traj_func': lambda img_path, anno_path, seq: os.path.join(anno_path, seq),
-        'traj_format': None,
-        'seq_list': ["alley_2", "ambush_4", "ambush_5", "ambush_6", "cave_2", "cave_4", "market_2",
-                     "market_5", "market_6", "shaman_3", "sleeping_1", "sleeping_2", "temple_2", "temple_3"],
-        'full_seq': False,
-        'mask_path_seq_func': lambda mask_path, seq: None,
-        'skip_condition': None,
-}
+
+def save_to_ply(data, filename):
+    with open(filename, 'w') as ply:
+        # PLY header
+        ply.write("ply\n")
+        ply.write("format ascii 1.0\n")
+        ply.write("element vertex {}\n".format(data.shape[0]))  # only non-zero values
+        ply.write("comment vertices\n")
+        ply.write("property float x\n")
+        ply.write("property float y\n")
+        ply.write("property float z\n")
+        # ply.write("property float value\n")  # or use "uchar red", "uchar green", "uchar blue" for RGB colors
+        # Adding properties for RGB colors
+
+        ply.write("end_header\n")
+
+        # PLY data
+        for (x, y, z) in data:
+            ply.write("{} {} {} \n".format(x, y, z))
 
 
-def sintel_cam_read(filename):
-    """Read camera data, return (M,N) tuple.
+def reprojection(points, K, RT):
+    v = np.concatenate((points, np.ones((points.shape[0], 1))), axis=1)
+    XYZ = (RT @ v.T).T[:, :3]
+    Z = XYZ[:, 2:]
+    XYZ = XYZ / XYZ[:, 2:]
+    xyz = (K @ XYZ.T).T
+    uv = xyz[:, :2]
+    return uv, Z
 
-    M is the intrinsic matrix, N is the extrinsic matrix, so that
+def inverse_projection(depth, K, RT):
+    h, w = depth.shape
 
-    x = M*N*X,
-    with x being a point in homogeneous image pixel coordinates, X being a
-    point in homogeneous world coordinates.
-    """
-    TAG_FLOAT = 202021.25
+    v, u = np.meshgrid(np.arange(h), np.arange(w), indexing='ij')
 
-    f = open(filename, "rb")
-    check = np.fromfile(f, dtype=np.float32, count=1)[0]
-    assert (
-        check == TAG_FLOAT
-    ), " cam_read:: Wrong tag in flow file (should be: {0}, is: {1}). Big-endian machine? ".format(
-        TAG_FLOAT, check
-    )
-    M = np.fromfile(f, dtype="float64", count=9).reshape((3, 3))
-    N = np.fromfile(f, dtype="float64", count=12).reshape((3, 4))
-    return M, N
+    # u = w - u - 1 # for v1.0 dataset
 
-def load_sintel_traj(gt_file): # './data/sintel/training/camdata_left/alley_2'
-    # Refer to ParticleSfM
-    gt_pose_lists = sorted(os.listdir(gt_file))
-    gt_pose_lists = [os.path.join(gt_file, x) for x in gt_pose_lists if x.endswith(".cam")]
-    tstamps = [float(x.split("/")[-1][:-4].split("_")[-1]) for x in gt_pose_lists]
-    gt_poses = [sintel_cam_read(f)[1] for f in gt_pose_lists] # [1] means get the extrinsic
-    breakpoint()
-    xyzs, wxyzs = [], []
-    tum_gt_poses = []
-    for gt_pose in gt_poses:
-        gt_pose = np.concatenate([gt_pose, np.array([[0, 0, 0, 1]])], 0)
-        gt_pose_inv = np.linalg.inv(gt_pose)  # world2cam -> cam2world
-        xyz = gt_pose_inv[:3, -1]
-        xyzs.append(xyz)
-        R = Rotation.from_matrix(gt_pose_inv[:3, :3])
-        xyzw = R.as_quat()  # scalar-last for scipy
-        wxyz = np.array([xyzw[-1], xyzw[0], xyzw[1], xyzw[2]])
-        wxyzs.append(wxyz)
-        tum_gt_pose = np.concatenate([xyz, wxyz], 0) #TODO: check if this is correct
-        tum_gt_poses.append(tum_gt_pose)
 
-    tum_gt_poses = np.stack(tum_gt_poses, 0)
-    tum_gt_poses[:, :3] = tum_gt_poses[:, :3] - np.mean(
-        tum_gt_poses[:, :3], 0, keepdims=True
-    )
-    tt = np.expand_dims(np.stack(tstamps, 0), -1)
-    return tum_gt_poses, tt
+    uv_homogeneous = np.vstack((u.flatten(), v.flatten(), np.ones_like(u.flatten())))
 
-def load_sintel_traj_se3(gt_file):
-    gt_pose_lists = sorted(os.listdir(gt_file))
-    gt_pose_lists = [os.path.join(gt_file, x) for x in gt_pose_lists if x.endswith(".cam")]
-    tstamps = [float(x.split("/")[-1][:-4].split("_")[-1]) for x in gt_pose_lists]
-    gt_poses = [sintel_cam_read(f)[1] for f in gt_pose_lists] # [1] means get the extrinsic
-    xyzs, wxyzs = [], []
-    tum_gt_poses = []
-    for gt_pose in gt_poses:
-        gt_pose = np.concatenate([gt_pose, np.array([[0, 0, 0, 1]])], 0)
-        tum_gt_poses.append(gt_pose)
+    K_inv = np.linalg.inv(K)
 
-    tum_gt_poses = np.stack(tum_gt_poses, 0)
-    tum_gt_poses[:, 3, :3] = tum_gt_poses[:, 3, :3] - np.mean(
-        tum_gt_poses[:, 3, :3], 0, keepdims=True
-    )
-    tt = np.expand_dims(np.stack(tstamps, 0), -1)
-    return tum_gt_poses, tt
-# dirs = glob.glob("../data/tum/*/")
-# dirs = sorted(dirs)
+    # use max depth as 10m for visualization
+    depth = depth.flatten()
+    mask = depth < 10
 
-# root_dir = "/scratch/yy561/monst3r/"
+    XYZ = K_inv @ uv_homogeneous * depth
 
-img_path = sintel_meta['img_path']
-mask_path = sintel_meta['mask_path']
+    XYZ = np.vstack((XYZ, np.ones(XYZ.shape[1])))
+    world_coordinates = np.linalg.inv(RT) @ XYZ
+    world_coordinates = world_coordinates[:3, :].T
+    world_coordinates = world_coordinates[mask]
 
-# extract frames
-# for dir in dirs:
+    return world_coordinates
+
+def get_consecutive_frame(frames, window_size):
+    
+    results = []
+    # split the frames into consecutive pieces
+    diff = frames[1:] - frames[0:-1]
+    diff_ind = np.where(diff != 1)[0]
+    start_indices = np.concatenate(([0], diff_ind[:-1])) + 1
+    end_indices = diff_ind
+    
+    # breakpoint()
+    for start, end in zip(start_indices, end_indices):
+        breakpoint()
+        if frames[end] - frames[start]  >= window_size:
+            for i in range(start, end - window_size + 1):
+                results.append(frames[start:start + window_size])
+    return results
+
+import tqdm
+select_constant = True
+
+data_path = '/scratch/yy561/pointodyssey/val/'
+# dataset_name = 'cnb_dlab_0215_ego2'
+exist = []
+
+ls = os.listdir(data_path)
+datasets = [l for l in ls if os.path.isdir(os.path.join(data_path, l)) and l not in exist]
+# datasets = ['scene_d78_ego1','cnb_dlab_0225_ego2','cnb_dlab_0215_ego2']
+# datasets = ['cnb_dlab_0225_ego2','cnb_dlab_0215_ego2']
+datasets = ['cnb_dlab_0225_ego2']
+
 selected_frames = []
 selected_frames_path = []
 cam_poses = []
 save = {"selected_frames":[], "cam_poses":[], "image_paths":[], 'scene_name':[], 'dataset_path':[], "dataset":[]}
 
-for dataset_name in sintel_meta['seq_list']:
+for dataset_name in datasets:
+    annotations = np.load('{}/{}/anno.npz'.format(data_path, dataset_name))
+    trajs_3d = annotations['trajs_3d'].astype(np.float32)
+    cam_ints = annotations['intrinsics'].astype(np.float32)
+    cam_exts = annotations['extrinsics'].astype(np.float32)
 
+    num_frames = cam_exts.shape[0]
     # dataset_name = dir.split('/')[-2]
     sliding_window = 30
     continue_flag = True
 
     # load all camera poses
-    traj_path = os.path.join(sintel_meta['gt_traj_func'](img_path, sintel_meta['anno_path'], dataset_name))
-    cam_exts, timestamps_mat = load_sintel_traj_se3(traj_path)
-    # for image_file in os.listdir(sintel_meta['dir_path_func'](img_path, seq_name)):
     # for image_file in os.listdir(os.path.join(sintel_meta['img_path'], seq_name)):
-    frames = sorted(glob.glob(os.path.join(sintel_meta['dir_path_func'](img_path, dataset_name), "*.png")))
+    # frames = sorted(glob.glob(os.path.join(sintel_meta['dir_path_func'](img_path, dataset_name), "*.png")))
+    # frames = [f.replace("../","") for f in frames]
+    frames = sorted(glob.glob(os.path.join(data_path, dataset_name, "rgbs", "*.jpg")))
     frames = [f.replace("../","") for f in frames]
     # turn quaternions into rotation matrices
     # cam_exts = []
@@ -127,9 +127,9 @@ for dataset_name in sintel_meta['seq_list']:
     # select camera constrained videos
     while continue_flag:
         # find consecutive frames within camera poses as long as possible
-        selected_frames = []
-        selected_frames_path = []
-        cam_poses = []
+        # selected_frames = []
+        # selected_frames_path = []
+        # cam_poses = []
         indices = range(0, num_frames, 1)
         reset_ind = False
 
@@ -161,7 +161,7 @@ for dataset_name in sintel_meta['seq_list']:
                     q_middle = Rotation.from_matrix(rotation_middle).as_quat()
                     # find the difference between the two quaternions
                     theta = 2*np.arccos(np.abs(np.dot(q_current,q_middle.conjugate())))
-                    if theta > 0.1:
+                    if theta > 0.07:
                         accept_flag = False
                     # check the translation difference, reject large baseline
                     # breakpoint()
@@ -171,7 +171,7 @@ for dataset_name in sintel_meta['seq_list']:
                     #     accept_flag = False
                     t_current = cam_exts[i][:3, 3]
                     t_middle = cam_middle[:3, 3]
-                    if np.linalg.norm(t_current - t_middle) > 0.2:
+                    if np.linalg.norm(t_current - t_middle) > 0.1:
                         accept_flag = False
             if accept_flag:
                 max_ind = min(num_frames-1, index + sliding_window//2)
@@ -224,5 +224,5 @@ print(dir, "\n", "Save Number of frames: ", num_frames, "Sliding window: ", slid
 import pickle
 print(len(save['selected_frames']))
 breakpoint()
-with open(f"/scratch/yy561/monst3r/data/sintel/sintel.pkl", "wb") as f:
+with open(f"/scratch/yy561/monst3r/data/pointodyssey_0225.pkl", "wb") as f:
     pickle.dump(save, f)

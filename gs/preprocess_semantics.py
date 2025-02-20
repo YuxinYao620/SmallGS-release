@@ -34,13 +34,15 @@ if __name__ == "__main__":
         dataset_names = meta['dataset']
         deataset_paths = meta['dataset_path']
         image_paths = meta['image_paths']
-
+        dataset_names = meta['dataset'] 
         for i, ind in enumerate(seq_ind):
             input_files = image_paths[i]
             start_idx =ind[0]
             end_idx = ind[-1]
-            args.seq_name = f"seq_{start_idx}_{end_idx}"
+            # args.seq_name = f"seq_{start_idx}_{end_idx}"
             args.input_dir = input_files
+            dataset_name = dataset_names[i]
+            args.seq_name = f"{dataset_name}_seq_{start_idx}_{end_idx}"
             output_dir = os.path.join(args.output_dir, args.seq_name, "semantics_langsam")
             os.makedirs(output_dir, exist_ok=True)
             output_dir_overall = os.path.join(args.output_dir, args.seq_name, "semantics_langsam_overall")
@@ -54,7 +56,10 @@ if __name__ == "__main__":
                 results = semantic_model.predict([image_pil], ["dynamic"])
 
                 masks = torch.Tensor(results[0]["masks"])
-                image_name = image_path.split("/")[-1].split(".")[0]
+                if "tum" in image_path:
+                    image_name = image_path.split("/")[-1].split(".png")[0]
+                else:
+                    image_name = image_path.split("/")[-1].split(".")[0]
                 
                 if masks.shape[1::] != image_pil.size[::-1]:
                     masks = torch.nn.functional.interpolate(masks, size=image_pil.size[::-1], mode="nearest")
@@ -77,7 +82,7 @@ if __name__ == "__main__":
                     overall_mask = overall_mask | mask_return.squeeze(0)
 
                 overall_mask = overall_mask.unsqueeze(0)
-                image_name = image_path.split("/")[-1].split(".")[0]
+                # image_name = image_path.split("/")[-1].split(".")[0]
                 masks_path_overall = f"{output_dir_overall}/{image_name}.npy"
                 np.save(masks_path_overall, overall_mask.cpu().detach().numpy())
                     

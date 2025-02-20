@@ -25,6 +25,7 @@ from gs.gs_diff import Runner
 from pathlib import Path
 from evo.core.trajectory import PoseTrajectory3D,PosePath3D
 import copy
+import gc
 
 import pickle
 
@@ -168,6 +169,10 @@ def get_args_parser():
     parser.add_argument("--eval_only", action='store_true', default=False, help="only evaluate the model")
 
     parser.add_argument("--dino", action='store_true', default=False, help="use dino model")
+    parser.add_argument("--ft_loss_lambda", type=float, default=1, help="feature loss lambda")
+    parser.add_argument("--dino_dim", type=int, default=6, help="use feature loss")
+    
+    parser.add_argument("--doma_eval", action='store_true', default=False, help="evaluate doma")
     return parser
 
 def get_3D_model_from_scene(outdir, silent, scene, min_conf_thr=3, as_pointcloud=False, mask_sky=False,
@@ -234,14 +239,8 @@ def intermediate_pcds(pairs, output, imgs, args):
                     max_ind = ind1
                     mark_i = i
         pred1 = output['pred1']['pts3d'][mark_i]
-        # gs_use_pts.append(pred1)
-        # gs_use_colors.append(output['view1']['img'][mark_i])
         gs_use_pts[ind] = pred1
         gs_use_colors[ind] = output['view1']['img'][mark_i]
-            
-        # ind1, ind2 = view1['idx'], view2['idx']
-        # if [ind1, ind2] in batch_ind:
-        #     pred1, pred2 = output[i]['pred1'], output[i]['pred2']
     return gs_use_pts, gs_use_colors
 def get_reconstructed_scene(args, outdir, model, device, silent, image_size, filelist, schedule, niter, min_conf_thr,
                             as_pointcloud, mask_sky, clean_depth, transparent_cams, cam_size, show_cam, scenegraph_type, winsize, refid, 
@@ -271,13 +270,19 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         scenegraph_type = scenegraph_type + "-" + str(winsize) + "-noncyclic"
     elif scenegraph_type == "oneref":
         scenegraph_type = scenegraph_type + "-" + str(refid)
-
-    # if not args.gs_refine and not args.gs_pose:
-    if not args.gs_pose:
+    if not os.path.exists(os.path.join(outdir, seq_name, "scene.glb")):
         pairs = make_pairs(imgs, scene_graph=scenegraph_type, prefilter=None, symmetrize=True)
         output = inference(pairs, model, device, batch_size=batch_size, verbose=not silent)
-        if args.gs_refine:
-            gs_use_pts, gs_use_colors = intermediate_pcds(pairs, output, imgs,args)
+        gs_use_pts, gs_use_colors = intermediate_pcds(pairs, output, imgs,args)
+        save_folder = f'{args.output_dir}/{seq_name}'  #default is 'demo_tmp/NULL'
+        os.makedirs(save_folder, exist_ok=True)
+        # with open(f'{outdir}/{seq_name}/gs_use_pts.pkl', 'wb') as f:
+        #     # pickle.dump(gs_use_pts, f)
+        #     save= {}
+        #     save['gs_use_pts'] = gs_use_pts
+        #     save['gs_use_colors'] = gs_use_colors
+        #     pickle.dump(save, f)
+            
         # if args.gs_refine and os.path.exists(os.path.join(args.output_dir, seq_name, "scene.glb")):
         #     pass
         # else:
@@ -295,41 +300,6 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         if mode == GlobalAlignerMode.PointCloudOptimizer:
             loss = scene.compute_global_alignment(init='mst', niter=niter, schedule=schedule, lr=lr) # estimate camera pose/intrinsic etc here
         
-        if args.gs_camera is not None:
-            print("Use gaussian splatting's camera pose")
-            gs_pose = torch.load(args.gs_camera) # (4,4)
-            gs_pose = torch.Tensor(gs_pose['global_cam_poses_est'])
-
-            # turn to quaternion
-            gs_pose_R = gs_pose[:,:3, :3]
-            # import pytorch3d.transforms.rotation_conversions as R
-            # from scipy.spatial.transform import Rotation
-            gs_pose_R = gs_pose_R.cpu().numpy()
-            
-            quat = Rotation.from_matrix(gs_pose_R)
-            quat = quat.as_quat()
-            quat = torch.Tensor(quat)
-            # translation 
-            t = gs_pose[:,:3, 3]
-            # set the camera pose
-            gs_camera_pose = torch.cat([quat,t], dim=1).detach().cpu().numpy()
-            # align camera_pose to current pose
-            from evo.core.trajectory import PoseTrajectory3D,PosePath3D
-            import copy
-            monst3r_camera_pose = scene.get_im_poses().detach().cpu().numpy()
-            traj_monst3r = PosePath3D(poses_se3=monst3r_camera_pose)
-            traj_gs = PosePath3D(
-                positions_xyz=gs_camera_pose[:,4:7],
-                orientations_quat_wxyz=gs_camera_pose[:,:4])
-            traj_gs.align(traj_monst3r, correct_scale=True, correct_only_scale=False)        
-            gs_camera_t = torch.Tensor(traj_gs.positions_xyz)
-            gs_camera_q = torch.Tensor(traj_gs.orientations_quat_wxyz)
-            gs_camera_pose = torch.cat([gs_camera_t, gs_camera_q], dim=1).to(device)
-
-            # set im poses
-            scene.post_set_pose(gs_camera_pose)
-            scene.im_poses = torch.nn.Parameter(gs_camera_pose)
-
         save_folder = f'{args.output_dir}/{seq_name}'  #default is 'demo_tmp/NULL'
         os.makedirs(save_folder, exist_ok=True)
 
@@ -347,10 +317,10 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
 
         depth_maps = scene.save_depth_maps(depth_path_save)
         dynamic_masks = scene.save_dynamic_masks(sem_path_save)
-        conf = scene.save_conf_maps(save_folder)
-        init_conf = scene.save_init_conf_maps(save_folder)
+        # conf = scene.save_conf_maps(save_folder)
+        # init_conf = scene.save_init_conf_maps(save_folder)
         rgbs = scene.save_rgb_imgs(save_folder)
-        pts3d = scene.get_pts3d()
+        # pts3d = scene.get_pts3d()
 
         enlarge_seg_masks(save_folder, kernel_size=5 if use_gt_mask else 3) 
 
@@ -393,20 +363,39 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         with Path(f"{outdir}/{seq_name}/time.txt").open("w") as f:
             f.write(f"MonST3R time: {monst3r_time:.2f}\n")
         # delete the results to clear the memory
+        del scene, rgbimg, depths, confs, init_confs, depths_max, confs_max, init_confs_max, imgs
+        gc.collect()
 
     if args.gs_pose:
-        
+        # del everything in monst3r
         if args.use_monst3r_intermediate:
-            pairs = make_pairs(imgs, scene_graph=scenegraph_type, prefilter=None, symmetrize=True)
-            output = inference(pairs, model, device, batch_size=batch_size, verbose=not silent)
-            gs_use_pts, gs_use_colors = intermediate_pcds(pairs, output, imgs,args)
+            if os.path.exists(f'{outdir}/{seq_name}/gs_use_pts.pkl'):
+                with open(f'{outdir}/{seq_name}/gs_use_pts.pkl', 'rb') as f:
+                    gts_pkl= pickle.load(f)
+                    gs_use_pts = gts_pkl['gs_use_pts']
+                    gs_use_colors = gts_pkl['gs_use_colors']
+            else:
+                imgs = load_images(filelist, size=image_size, verbose=not silent, dynamic_mask_root=dynamic_mask_path, fps=fps, num_frames=num_frames)
+                pairs = make_pairs(imgs, scene_graph=scenegraph_type, prefilter=None, symmetrize=True)
+                output = inference(pairs, model, device, batch_size=batch_size, verbose=not silent)
+                gs_use_pts, gs_use_colors = intermediate_pcds(pairs, output, imgs,args)
+                # save
+                save_gts = {}
+                save_gts['gs_use_pts'] = gs_use_pts
+                save_gts['gs_use_colors'] = gs_use_colors
+                # with open(f'{outdir}/{seq_name}/gs_use_pts.pkl', 'wb') as f:
+                #     pickle.dump(save_gts, f)
+
+                del imgs, pairs, output
+                gc.collect()
+        
         print('using gaussian splatting to estimate camera poses, not refine!')
         args.workspace = f'{args.output_dir}/{seq_name}' 
         args.data_dir = args.input_dir
         args.monst3r_dir = f'{args.output_dir}/{seq_name}' 
         args.camera_smoothness_lambda = 1
-        args.datatype = 'custom'
-        # args.datatype = 'monst3r'
+        # args.datatype = 'custom'
+        args.datatype = 'monst3r' if "own" not in args.output_dir else 'custom'
 
         runner = Runner(local_rank=args.local_rank, world_rank=args.world_rank, world_size=args.world_size, opt=args)
         
@@ -449,8 +438,6 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
                 f.write(f"{k}: {v}\n")
         # # run evaluation 
         # eval_monst3r_gs_poses(args)
-
-        return None, None, imgs
 
     if args.gs_refine:
         # monst3r_traj = scene.save_tum_poses(f'{outdir}/{seq_name}/pred_traj_before_refine.txt')
@@ -512,6 +499,28 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
 
         if args.use_monst3r_intermediate:
             print('use monst3r intermediate pointmaps')
+            if "gs_use_pts" not in locals():
+                if os.path.exists(f'{outdir}/{seq_name}/gs_use_pts.pkl'):
+                    with open(f'{outdir}/{seq_name}/gs_use_pts.pkl', 'rb') as f:
+                        gts_pkl= pickle.load(f)
+                    gs_use_pts = gts_pkl['gs_use_pts'] 
+                    gs_use_colors = gts_pkl['gs_use_colors']
+                    
+                else:
+                    imgs = load_images(filelist, size=image_size, verbose=not silent, dynamic_mask_root=dynamic_mask_path, fps=fps, num_frames=num_frames)
+                    pairs = make_pairs(imgs, scene_graph=scenegraph_type, prefilter=None, symmetrize=True)
+                    output = inference(pairs, model, device, batch_size=batch_size, verbose=not silent)
+                    gs_use_pts, gs_use_colors = intermediate_pcds(pairs, output, imgs,args)
+                    # save
+                    gts_save = {}
+                    gts_save['gs_use_pts'] = gs_use_pts
+                    gts_save['gs_use_colors'] = gs_use_colors
+                    # with open(f'{outdir}/{seq_name}/gs_use_pts.pkl', 'wb') as f:
+                    #     pickle.dump(gts_save, f)
+
+                    del imgs, pairs, output
+                    gc.collect()
+
             refined_pose = runner.train(monst3r_pointmap = gs_use_pts, monst3r_pointcolor = gs_use_colors)['global_cam_poses_est']
         else:
             refined_pose = runner.train()['global_cam_poses_est']
@@ -551,10 +560,10 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
             f.write(f"GS refine time: {gs_refine_time:.2f}\n")
         # # run evaluation 
         # eval_monst3r_gs_poses(args)
-        return None, None, imgs
         
     
-    return scene, outfile, imgs
+    # return scene, outfile, imgs
+    return None, None, None
 
 
 def get_pose_from_gs(args):
@@ -718,6 +727,19 @@ if __name__ == '__main__':
 
     if args.input_dir is not None:
         # if "pkl" in args.input_dir:   # input_dir is a metadata file
+        # try:
+        #     print('starting gradio')
+        #     if args.doma_eval:
+        #         #args.workspace = f'{args.output_dir}/{seq_name}' 
+        #         args.data_dir = args.input_dir
+        #         args.monst3r_dir = f'{args.output_dir}/{seq_name}' 
+        #         args.camera_smoothness_lambda = 1
+        #         # args.datatype = 'custom'
+        #         args.datatype = 'monst3r' if "own" not in args.output_dir else 'custom'
+
+        #         runner = Runner(local_rank=args.local_rank, world_rank=args.world_rank, world_size=args.world_size, opt=args)
+        # except:
+        #     pass
         if 'meta' in args.input_dir:
             # find parent dir 
             # parent_dir = os.path.dirname(args.input_dir)
@@ -766,25 +788,33 @@ if __name__ == '__main__':
                         flow_loss_threshold=25,
                         use_gt_mask=args.use_gt_davis_masks,
                         fps=args.fps,
-                        num_frames=args.num_frames,
+                        num_frames=args.num_frames
                     )
                 # 
         elif 'pkl' in args.input_dir:
             with open(args.input_dir, 'rb') as f:
+            # with open("/scratch/yy561/monst3r/data/tum/tum_cam_poses_all_theta0.07.pkl", 'rb') as f:    
                 pkl = pickle.load(f)
             # loop every index list of meta
             seq_ind = pkl['selected_frames']
             cam_poses = pkl['cam_poses']
-            dataset_names = pkl['dataset']
+            dataset_names = pkl['dataset'] 
             deataset_paths = pkl['dataset_path']
             image_paths = pkl['image_paths']
-
+            print("len(pkl)", len(seq_ind))
+            import imageio
             for i, ind in enumerate(seq_ind):
                 input_files = image_paths[i]
                 start_idx =ind[0]
                 end_idx = ind[-1]
-                args.seq_name = f"seq_{start_idx}_{end_idx}"
+                dataset_name = dataset_names[i]
+                args.seq_name = f"{dataset_name}_seq_{start_idx}_{end_idx}"
                 args.input_dir = input_files
+                image = imageio.imread(input_files[0])
+                image_size = image.size
+                # if args.data_factor > 1:
+                #     image_size = [image.shape[0]//args.data_factor, image.shape[1]//args.data_factor]
+                # args.image_size = image_size
 
                 recon_fun = functools.partial(get_reconstructed_scene, args, tmpdirname, model, args.device, args.silent, args.image_size)
                 scene, outfile, imgs = recon_fun(
