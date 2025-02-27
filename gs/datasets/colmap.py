@@ -19,6 +19,7 @@ from pytorch3d.transforms import matrix_to_quaternion, quaternion_to_matrix
 import math
 import pickle
 
+
 from gs.Marigold.marigold import MarigoldPipeline
 
 from .normalize import (
@@ -37,6 +38,11 @@ import glob
 
 from typing import Sequence
 from torchvision import transforms
+from einops import rearrange
+from torchvision.transforms import Normalize
+from torchvision.transforms.functional import resize
+from torchvision.utils import save_image
+from torchvision.io.image import read_image, ImageReadMode
 IMAGENET_DEFAULT_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_DEFAULT_STD = (0.229, 0.224, 0.225)
 
@@ -198,6 +204,10 @@ class Parser:
             self.data_dir = data_dir 
             self.semantic_path = os.path.join(monst3r_dir, "semantics")
             self.depth_path = os.path.join(monst3r_dir, "depths")
+            self.dino_path = os.path.join(monst3r_dir, "dino_embeddings")
+            os.makedirs(self.semantic_path, exist_ok=True)
+            os.makedirs(self.depth_path, exist_ok=True)
+            os.makedirs(self.dino_path, exist_ok=True)
             if data_dir is not list:
                 image_names = glob.glob(os.path.join(monst3r_dir, "frame*.png"))
                 self.image_names = [name.split('/')[-1] for name in image_names]
@@ -528,7 +538,8 @@ class Parser:
             if not isinstance(data_dir, list):
                 data_info = data_dir.split('/')
                 seq_name = data_info[-1]
-                image_names = [name for name in sorted(os.listdir(os.path.join(data_dir)))]
+                # image_names = [name for name in sorted(os.listdir(os.path.join(data_dir)))]
+                image_names = [os.path.basename(name)  for name in sorted(glob.glob(os.path.join(data_dir)+"*.png"))]
                 seq_len = len(image_names)
                 # find one image to get the size
                 image = imageio.imread(os.path.join(data_dir,image_names[0]))[..., :3]
@@ -638,9 +649,11 @@ class Parser:
         
         self.semantic_path = os.path.join(data_dir, "semantics") if self.semantic_path is None else self.semantic_path
         self.depth_path = os.path.join(data_dir, "depths") if self.depth_path is None else self.depth_path
+        self.dino_path = os.path.join(data_dir, "dino_embeddings")
         os.makedirs(self.semantic_path, exist_ok=True)
         os.makedirs(self.depth_path, exist_ok=True)
-        
+        os.makedirs(self.dino_path, exist_ok=True)
+
         self.mapx_dict = dict()
         self.mapy_dict = dict()
         self.roi_undist_dict = dict()
@@ -690,7 +703,8 @@ class Dataset:
         load_canny: bool = False,
         # background_color = None
         datatype = "custom",
-        dino = False
+        dino = False,
+        opt = None
     ):
         self.parser = parser
         self.split = split
@@ -710,10 +724,12 @@ class Dataset:
         self.camtoworlds_gt = None
         self.datatype = datatype
         self.dino = dino
+        self.opt = opt
+        # self.dino_emb_list = OrderedDict()
         # self.background_color = background_color
 
         # check whether depth map is already generated
-        if os.path.exists(self.parser.depth_path) and len(os.listdir(self.parser.depth_path)) > 0:
+        if os.path.exists(self.parser.depth_path) and len(os.listdir(self.parser.depth_path)) > 1:
             print("self.parser.depth_path",self.parser.depth_path)
             pass
         else:
@@ -733,14 +749,17 @@ class Dataset:
             breakpoint()
         if self.split == "val":
             self.indices = self.indices[:: self.parser.test_every]
-        if self.dino:
-            backbone_name= f"dinov2_vits14"
-            torch.hub.set_dir("/scratch/yy561/.cache/hub")
-            backbone_model = torch.hub.load(repo_or_dir="facebookresearch/dinov2", model=backbone_name, )
-            backbone_model.eval()
-            backbone_model.cuda()
-            self.dino_model = backbone_model
-            
+        # if self.dino:
+        #     if os.path.exists(self.parser.dino_path) and len(os.listdir(self.parser.dino_path)) > 0:
+        #         pass
+        #     else:
+        #         # backbone_name= f"dinov2_vits14"
+        #         # torch.hub.set_dir("/scratch/yy561/.cache/hub")
+        #         # backbone_model = torch.hub.load(repo_or_dir="facebookresearch/dinov2", model=backbone_name, )
+        #         # backbone_model.eval()
+        #         # backbone_model.to(self.device)
+        #         # self.dino_model = backbone_model
+                
 
     def __len__(self):
         return len(self.indices)
@@ -784,7 +803,65 @@ class Dataset:
         test_image = transform(test_image)
         embeddings = self.dino_model(test_image.unsqueeze(0).cuda())
         return embeddings
+    
+    def minmax_norm(self,x):
+        """Min-max normalization"""
+        return (x - x.min(0).values) / (x.max(0).values - x.min(0).values)
 
+    def get_dino_feature_map(self,image,H = 518,W = 518, rank = 6):
+        backbone_name= f"dinov2_vits14"
+        torch.hub.set_dir("/scratch/yy561/.cache/hub")
+        backbone_model = torch.hub.load(repo_or_dir="facebookresearch/dinov2", model=backbone_name, )
+        backbone_model.eval()
+        backbone_model.to(self.device)
+        dino_model = backbone_model
+
+        originalH, originalW = image.shape[-3], image.shape[-2]
+        if len(image.shape) == 4:
+            batch = image.shape[0]
+        else:
+            batch = 0
+        if not isinstance(image, torch.Tensor):
+            img = torch.Tensor(image).permute(2, 0, 1).float() / 255.0
+        else:
+            img = image.permute(0, 3, 1, 2).float() 
+        img = resize(img, (H,W))
+        # resize image to 224x224 with np
+        # img = cv2.resize(image, (H,W))
+        # normalize image with np
+        # norm = (img-IMAGENET_DEFAULT_MEAN)/IMAGENET_DEFAULT_STD
+        norm = Normalize(mean=IMAGENET_DEFAULT_MEAN, std=IMAGENET_DEFAULT_STD)(img)
+        
+        I_norm = norm.unsqueeze(0).to(self.device) if len(norm.shape) == 3 else norm.to(self.device)
+        features = dino_model.forward_features(I_norm)
+        E_patch = features["x_norm_patchtokens"]
+        E_patch_norm = rearrange(E_patch, "B L E -> (B L) E")
+        _, _, V = torch.pca_lowrank(E_patch_norm, q=rank)
+        E_pca = torch.matmul(E_patch_norm, V[:, :rank])
+        E_pca = self.minmax_norm(E_pca)
+        B, L, _ = E_patch.shape
+        Z = B * L
+
+        I_draw = E_pca
+        I_draw = rearrange(I_draw, "(B L) C -> B L C", B=B)
+
+        I_draw = rearrange(I_draw, "B (h w) C -> B h w C", h=H//14, w=W//14)
+
+        if batch == 0:
+            I_draw = I_draw.squeeze(0)
+            image_1_pca = rearrange(I_draw, "H W C -> C H W")
+
+            image_1_pca = resize(image_1_pca, (originalH,originalW))
+            # image_1_pca = image_1_pca.permute(1, 2, 0).detach().cpu().numpy()
+            image_1_pca = image_1_pca.permute(1, 2, 0)
+        else:
+            image_1_pca = rearrange(I_draw, "B H W C -> B C H W")
+            image_1_pca = resize(image_1_pca, (originalH,originalW))
+            image_1_pca = image_1_pca.permute(0, 2, 3, 1)
+        del dino_model, backbone_model
+        torch.cuda.empty_cache()
+        
+        return image_1_pca
 
     def __getitem__(self, item: int) -> Dict[str, Any]:
         if item not in self.gt_image_indices:
@@ -792,6 +869,9 @@ class Dataset:
         else:
             index = self.indices[item]
             image = imageio.imread(self.parser.image_paths[index])[..., :3]
+            # reshape to monst3r_size 
+            # image = cv2.resize(image, (512, 384))
+            # image = cv2.resize(image, (518, 228))
             
             camera_id = self.parser.camera_ids[index]
             # K = self.parser.Ks_dict[camera_id].cpu().numpy().copy()  # undistorted K
@@ -801,9 +881,15 @@ class Dataset:
             if self.parser.factor > 1:
                 image = cv2.resize(image, (image.shape[1] // self.parser.factor, image.shape[0] // self.parser.factor))
                 # save resized image
-                if not os.path.exists(self.parser.data_dir + f"/images_{self.parser.factor}"):
-                    os.makedirs(self.parser.data_dir + f"/images_{self.parser.factor}")
-                imageio.imwrite(self.parser.data_dir + f"/images_{self.parser.factor}/{self.parser.image_names[index]}", image)
+                # breakpoint()
+
+                # if isinstance(self.parser.image_paths[index], list):
+                #     root_dir = os.path.dirname(self.parser.image_paths[index])
+                # else:
+                #     root_dir = self.parser.data_dir
+                # if not os.path.exists(root_dir + f"/images_{self.parser.factor}"):
+                #     os.makedirs(root_dir + f"/images_{self.parser.factor}")
+                # imageio.imwrite(root_dir + f"/images_{self.parser.factor}/{self.parser.image_names[index]}", image)
                 K[:2, :] /= self.parser.factor
 
             params = self.parser.params_dict[camera_id]
@@ -834,12 +920,14 @@ class Dataset:
                 img_blur = cv2.GaussianBlur(img_gray, (5, 5), 0)
                 img_canny = cv2.Canny(img_blur, 50, 150)
 
+            depth_filename = self.parser.depth_path + f"/{self.parser.image_names[index].split('.')[0]}.npy" if "tum" not in self.parser.depth_path else self.parser.depth_path + f"/{self.parser.image_names[index].split('.png')[0]}.npy"
             if index in self.depth_list:
                 depth_map = self.depthmap_list[index]
                 depth = self.depth_list[index]
-            elif os.path.exists(self.parser.depth_path + f"/{self.parser.image_names[index].split('.')[0]}.npy"):
-                print("load from : ", self.parser.depth_path + f"/{self.parser.image_names[index].split('.')[0]}.npy")
-                depth = np.load(self.parser.depth_path + f"/{self.parser.image_names[index].split('.')[0]}.npy")
+            # elif os.path.exists(self.parser.depth_path + f"/{self.parser.image_names[index].split('.')[0]}.npy"):
+            elif os.path.exists(depth_filename):
+                print("load from : ",depth_filename)
+                depth = np.load(depth_filename)
 
                 if self.parser.factor > 1:
                     depth = cv2.resize(depth, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_NEAREST)
@@ -866,18 +954,34 @@ class Dataset:
             else:
                 input_image = torch.tensor(image).permute(2, 0, 1).unsqueeze(0).float().to(self.device)
                 if self.depth_type == "marigold":
-                    pipe_out = self.pipe(
-                        input_image,
-                        denoising_steps=None,
-                        ensemble_size=5,
-                        processing_res=768,
-                        match_input_res=True,
-                        batch_size=1,
-                        color_map="Spectral",
-                        show_progress_bar=False,
-                        resample_method="bilinear",
-                        generator=torch.Generator(self.device).manual_seed(42),
-                    )
+                    try:
+                        pipe_out = self.pipe(
+                            input_image,
+                            denoising_steps=None,
+                            ensemble_size=5,
+                            processing_res=768,
+                            match_input_res=True,
+                            batch_size=1,
+                            color_map="Spectral",
+                            show_progress_bar=False,
+                            resample_method="bilinear",
+                            generator=torch.Generator(self.device).manual_seed(42),
+                        )
+                    except:
+                        pipe: MarigoldPipeline = MarigoldPipeline.from_pretrained("prs-eth/marigold-lcm-v1-0", variant=None, torch_dtype=torch.float32)
+                        self.pipe = pipe.to(self.device)
+                        pipe_out = self.pipe(
+                            input_image,
+                            denoising_steps=None,
+                            ensemble_size=5,
+                            processing_res=768,
+                            match_input_res=True,
+                            batch_size=1,
+                            color_map="Spectral",
+                            show_progress_bar=False,
+                            resample_method="bilinear",
+                            generator=torch.Generator(self.device).manual_seed(42),
+                        )
                     prediction = pipe_out.depth_np
                     prediction = torch.from_numpy(pipe_out.depth_np)
                     # use image canny to mask out depth prediction
@@ -891,15 +995,6 @@ class Dataset:
                     marigold_scale = 1.1
                     marigold_t = 1.0
                     prediction = prediction*marigold_scale+marigold_t 
-                    # # range 1-10
-                    
-                    # prediction = (prediction - prediction.min()) / (prediction.max() - prediction.min())
-                    # prediction = prediction*10 
-                    # # depth_scale = np.clip(depth_scale, 1, 10)
-                    # prediction = torch.clamp(prediction, 1, 10)
-                    
-                    # range 0-1
-
 
                     pts = depth_to_3d(prediction[None, None],
                                 intr_mat_tensor[None],
@@ -947,40 +1042,38 @@ class Dataset:
                     depth_canonical = pts_canonical.permute(0, 2, 3, 1).squeeze(0).reshape(-1, 3)
 
                 # save the depth map
-                
                 # find image path and save depth map
                 if not os.path.exists(self.parser.depth_path):
                     os.makedirs(self.parser.depth_path, exist_ok=True)
                 np.save(f"{self.parser.depth_path}/{self.parser.image_names[index].split('.')[0]}.npy", depth_map.cpu().detach().numpy())
-                # np.save(f"{self.parser.depth_path}/{self.parser.image_names[index].split('.')[0]}_canonical.npy", prediction.cpu().detach().numpy())
-
-                # test_basedir = "Church_allmask" 
-                # os.makedirs(f"{test_basedir}", exist_ok=True)
-                # np.save(f"{test_basedir}/pts_{index}.npy", depth.cpu().detach().numpy())
-                # np.save(f"{test_basedir}/depth_map_{index}.npy", depth_map.cpu().detach().numpy())
-                # np.save(f"{test_basedir}/pts_canonical_{index}.npy", depth_canonical.cpu().detach().numpy())
-                # np.save(f"{test_basedir}/depth_map_canonical_{index}.npy", prediction.cpu().detach().numpy())
-
 
 
             if self.load_semantics and self.datatype == "custom":
-                assert os.path.exists(self.parser.semantic_path + f"/{self.parser.image_names[index].split('.')[0]}.npy") , f"Semantic mask not found for {self.parser.image_names[index].split('.')[0]}"
-                mask = np.load(self.parser.semantic_path + f"/{self.parser.image_names[index].split('.')[0]}.npy")
+                # assert os.path.exists(self.parser.semantic_path + f"/{self.parser.image_names[index].split('.')[0]}.npy") , f"Semantic mask not found for {self.parser.image_names[index].split('.')[0]}"
+                if "tum" in self.parser.semantic_path:
+                    mask_path = self.parser.semantic_path + f"/{self.parser.image_names[index].split('.png')[0]}.npy"
+                else:
+                    mask_path = self.parser.semantic_path + f"/{self.parser.image_names[index].split('.')[0]}.npy"
+                assert os.path.exists(mask_path) , f"Semantic mask not found for {self.parser.image_names[index].split('.')[0]}"
+                # mask = np.load(self.parser.semantic_path + f"/{self.parser.image_names[index].split('.')[0]}.npy")
+                mask = np.load(mask_path)
                 mask = torch.from_numpy(mask).bool()
                 if self.parser.factor > 1:
                     mask = F.interpolate(mask.unsqueeze(0).float(), 
                                         size=(image.shape[0], image.shape[1]), mode='nearest').squeeze().bool()
                     assert mask.shape == image.shape[:2], f"Mask shape {mask.shape} does not match image shape {image.shape[:2]}"
-                breakpoint()
+                if mask.shape != image.shape[:2]:
+                    mask = F.interpolate(mask.unsqueeze(0).float(),
+                                        size=(image.shape[0], image.shape[1]), mode='nearest').squeeze().bool()
                 mask = mask.view(image.shape[0], image.shape[1],1)
             elif self.load_semantics and self.datatype == "monst3r":
                 assert os.path.exists(self.parser.semantic_path + f"/dynamic_mask_{index}.png")
                 mask = imageio.imread(self.parser.semantic_path + f"/dynamic_mask_{index}.png") # 0 is non dynamic, 1 is dynamic
                 mask = torch.from_numpy(mask/255).bool()
                 if self.parser.factor > 1:
-                    mask = F.interpolate(mask.unsqueeze(0).float(), 
+                    mask = F.interpolate(mask.unsqueeze(0).unsqueeze(0).float(), 
                                         size=(image.shape[0], image.shape[1]), mode='nearest').squeeze().bool()
-                    assert mask.shape == image.shape[:2], f"Mask shape {mask.shape} does not match image shape {image.shape[:2]}"                
+                    assert mask.shape == image.shape[:2], f"Mask shape {mask.shape} does not match image shape {image.shape[:2]}" 
                 mask = ~mask.view(image.shape[0], image.shape[1],1)
             else:
                 mask = None
@@ -988,7 +1081,30 @@ class Dataset:
 
             # dino feature 
             if self.dino:
-                embeddings = self.get_dino_features(image)
+                # if index not in self.dino_emb_list:
+                dino_path = os.path.join(self.parser.dino_path, f"{self.parser.image_names[index].split('.')[0]}.npy")
+                if not os.path.exists(dino_path):
+                    # the minimum common multiple of 14 and image size 
+                    embeddings = self.get_dino_feature_map(image, 518, 518, rank = self.opt.dino_dim if self.opt is not None else 3)
+                    # assert embeddings.shape[:2] == image.shape[:2]
+                    # self.dino_emb_list[index] = embeddings
+                    np.save(dino_path, embeddings.detach().cpu().numpy())
+                else:
+                    embeddings = torch.from_numpy(np.load(dino_path))
+                    if embeddings.shape[-1] != self.opt.dino_dim:
+                        embeddings = self.get_dino_feature_map(image, 518, 518, rank = self.opt.dino_dim)
+                        np.save(dino_path, embeddings.detach().cpu().numpy())
+                    if embeddings.shape[:2] != image.shape[:2]:
+                        embeddings = F.interpolate(embeddings.unsqueeze(0).permute(0,3,1,2), 
+                                        size=(image.shape[0], image.shape[1]), mode='bilinear').squeeze().permute(1,2,0)
+                    if self.parser.factor > 1:
+                        embeddings = F.interpolate(embeddings.unsqueeze(0).permute(0,3,1,2), 
+                                        size=(image.shape[0], image.shape[1]), mode='bilinear').squeeze().permute(1,2,0)
+                    # self.dino_emb_list[index] = embeddings.to(self.device)
+
+                # else:
+                #     embeddings = self.dino_emb_list[index]
+
             else:
                 embeddings = None
             data = {
@@ -1002,9 +1118,7 @@ class Dataset:
                 "depth": depth.to(self.device),
                 "depth_map": depth_map.to(self.device),
                 "mask": mask.to(self.device) if mask is not None else torch.zeros(image.shape[0], image.shape[1],1).bool().to(self.device),
-                # "mask": mask.to(self.device) if mask is not None else torch.zeros(image.shape[0], image.shape[1],1).bool().to(self.device),
                 "generated" : False,
-                # "alpha": alpha.to(self.device) if alpha is not None else None
                 "dino_embeddings": embeddings.to(self.device) if embeddings is not None else None
             }
             return data

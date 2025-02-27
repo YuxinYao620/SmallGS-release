@@ -43,17 +43,19 @@ if __name__ == "__main__":
             args.input_dir = input_files
             dataset_name = dataset_names[i]
             args.seq_name = f"{dataset_name}_seq_{start_idx}_{end_idx}"
+            if not os.path.exists(os.path.join(args.output_dir, args.seq_name)):
+                continue
             output_dir = os.path.join(args.output_dir, args.seq_name, "semantics_langsam")
             os.makedirs(output_dir, exist_ok=True)
             output_dir_overall = os.path.join(args.output_dir, args.seq_name, "semantics_langsam_overall")
             os.makedirs(output_dir_overall, exist_ok=True)
             device = "cuda" if torch.cuda.is_available() else "cpu"
-            for image_path in input_files:
+            for idx, image_path in enumerate(input_files):
                 # print("image_path",image_path)
                 image_pil = Image.open(image_path)
                 # masks, boxes, phrases, logits  = semantic_model.predict([image_pil], ["dynamic"])[0]
                 # scores, labels, boxes, masks, mask_scores  = semantic_model.predict([image_pil], ["dynamic"])[0]
-                results = semantic_model.predict([image_pil], ["dynamic"])
+                results = semantic_model.predict([image_pil], ["human"])
 
                 masks = torch.Tensor(results[0]["masks"])
                 if "tum" in image_path:
@@ -62,8 +64,10 @@ if __name__ == "__main__":
                     image_name = image_path.split("/")[-1].split(".")[0]
                 
                 if masks.shape[1::] != image_pil.size[::-1]:
+                    # breakpoint()
                     masks = torch.nn.functional.interpolate(masks, size=image_pil.size[::-1], mode="nearest")
-                masks_path = f"{output_dir}/{image_name}.npy"
+                # masks_path = f"{output_dir}/{image_name}.npy"
+                masks_path = f"{output_dir}/frame_{idx:04d}"
                 if masks.shape[0]> 1:
                     masks = masks[0].unsqueeze(0)
                 # try:

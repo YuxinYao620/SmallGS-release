@@ -7,6 +7,9 @@ from batch_eval_camera import eval_monst3r_gs_poses
 import matplotlib.pyplot as plt
 import os
 import numpy as np
+from matplotlib.ticker import ScalarFormatter, FormatStrFormatter
+
+
 def argparse():
     import argparse
     parser = argparse.ArgumentParser(description='Evaluate the camera poses')
@@ -17,7 +20,8 @@ def argparse():
 if __name__ == "__main__":
 
     import pickle
-    with open("data/tum/tum_cam_poses_all_0.07.pkl", 'rb') as f:
+    # with open("data/tum/tum_cam_poses_all_0.07.pkl", 'rb') as f:
+    with open("data/tum/tum_cam_poses_static_gt.pkl", 'rb') as f:
         save = pickle.load(f)
     # if args.save_dir is not None:
     #     with open(os.path.join(args.save_dir), 'rb') as f:
@@ -56,15 +60,12 @@ if __name__ == "__main__":
         traj_gs = None
         traj_cf3dgs = None
         traj_droid = None
-        # load the ground truth poses
-        # if gt_pose is None:
-        #     gt_path = f'{output_dir}/{seq}/cam_poses.npy'
-        #     gt_pose = np.load(gt_path)
-        # else:
-        #     gt_pose = np.array(gt_pose)
-        #     gt_path = f'{output_dir}/{seq}/cam_poses.npy'
-        #     np.save(gt_path, gt_pose)
-        gt_path = f'{output_dir}/{seq}/cam_poses.npy'
+
+        # gt_path = f'{output_dir}/{seq}/cam_poses.npy'
+        # gt_pose = np.load(gt_path)
+        # timestamps_mat = np.arange(gt_pose.shape[0]).astype(float)
+
+        gt_path = f'{output_dir}/{seq}/cam_poses_traj.npy'
         gt_pose = np.load(gt_path)
         timestamps_mat = np.arange(gt_pose.shape[0]).astype(float)
 
@@ -112,7 +113,11 @@ if __name__ == "__main__":
                 timestamps=np.array(timestamps_mat))
         
             
-        pose_gt = PosePath3D(poses_se3=gt_pose)
+        # pose_gt = PosePath3D(poses_se3=gt_pose)
+        pose_gt = PoseTrajectory3D(
+            positions_xyz=gt_pose[:,:3],
+            orientations_quat_wxyz=gt_pose[:,3:],
+            timestamps=np.array(timestamps_mat))
         traj_gt = PoseTrajectory3D(poses_se3=pose_gt.poses_se3, timestamps=timestamps_mat)
 
         traj_monster.align(traj_gt, correct_scale=True)
@@ -134,20 +139,43 @@ if __name__ == "__main__":
         traj_by_label = {
             "Ground-truth": traj_gt,
             # "Monst3r": traj_monster,
-            "Refined": traj_refined,
-            # "GS": traj_gs,
+            # "Refined": traj_refined,
+            "GS": traj_gs,
             # "CF3DGS": traj_cf3dgs,
-            "Droid": traj_droid,
+            # "Droid": traj_droid,
         }
         plot_mode = plot.PlotMode.xyz
         # ax = plot.prepare_axis(fig, plot_mode, 111)
         ax = fig.add_subplot(111, projection="3d")
-        ax.xaxis.set_tick_params(labelbottom=True)
-        ax.yaxis.set_tick_params(labelleft=True)
-        ax.zaxis.set_tick_params(labelleft=True)
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
+        ax.xaxis.set_tick_params(labelbottom=False)
+        ax.yaxis.set_tick_params(labelleft=False)
+        ax.zaxis.set_tick_params(labelleft=False)
+        # ax.set_xlabel('X')
+        # ax.set_ylabel('Y')
+        # ax.set_zlabel('Z')
+
+        # Use scientific notation for tick labels
+        # formatter = ScalarFormatter()
+        # formatter.set_scientific(True)
+        # formatter.set_powerlimits((-2, 2))
+
+        # ax.xaxis.set_major_formatter(formatter)
+        # ax.yaxis.set_major_formatter(formatter)
+        # ax.zaxis.set_major_formatter(formatter)
+
+        # # Rotate the tick labels
+        # for label in ax.get_xticklabels():
+        #     label.set_rotation(45)
+        # for label in ax.get_yticklabels():
+        #     label.set_rotation(45)
+        # for label in ax.get_zticklabels():
+        #     label.set_rotation(45)
+
+        # # Reduce the number of ticks
+        # ax.xaxis.set_major_locator(plt.MaxNLocator(5))
+        # ax.yaxis.set_major_locator(plt.MaxNLocator(5))
+        # ax.zaxis.set_major_locator(plt.MaxNLocator(5))
+        
 
         for idx, (label, traj) in enumerate(traj_by_label.items()):
             print(f"Plotting {label}")
@@ -158,9 +186,11 @@ if __name__ == "__main__":
             except:
                 breakpoint()
                 # break
+        ax.legend(fontsize=16)
         ax.view_init(elev=10., azim=45)
         plt.tight_layout()
         # pose_vis_path = os.path.join(os.path.dirname(output_path), 'pose_vis.png')
-        output_path = os.path.join(output_dir, "pose_img_droid_dino", "{}.png".format(seq))
+        output_path = os.path.join(output_dir, "paper_dino_gs", "{}.png".format(seq))
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
         # output_path = os.path.join(output_dir, "pose_img_dino16", "{}.png".format(seq))
         fig.savefig(output_path)

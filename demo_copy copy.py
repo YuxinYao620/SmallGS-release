@@ -398,14 +398,34 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         args.camera_smoothness_lambda = 1
         # args.datatype = 'custom'
         args.datatype = 'monst3r' if "own" not in args.output_dir else 'custom'
-
+        if args.test_gs:
+            args.datatype = 'custom'
         runner = Runner(local_rank=args.local_rank, world_rank=args.world_rank, world_size=args.world_size, opt=args)
         
         if args.use_monst3r_intermediate:
             print('using monst3r intermediate pointmaps')
             gs_pose = runner.train(monst3r_pointmap = gs_use_pts, monst3r_pointcolor = gs_use_colors)['global_cam_poses_est']
         else:
-            gs_pose = runner.train()['global_cam_poses_est']
+            # if args.test_gs:
+            #     pose_ckpt = "/scratch/yy561/monst3r/paper_example/tum_rgb_refine_pose_copy/rgbd_dataset_freiburg3_walking_static_seq_390_419/traj/gs_camera_poses.pt"
+            #     pose_ckpt = torch.load(pose_ckpt, map_location=args.device)
+            #     global_cam_poses_est = pose_ckpt['global_cam_poses_est']
+            #     runner.trainset.set_camera_to_world(global_cam_poses_est)
+            #     runner.train_gs_doma_sem(args.sh_degree,initial_train_step = 12000) # inited splat, doma doma optimizer, doma scheduler
+            #     # runner.train_gs_doma(args.sh_degree,global_cam_poses_est)
+            #     return None, None, None
+            if args.test_gs:
+                pose_ckpt = "/scratch/yy561/monst3r/paper_example/tum_rgb_refine_pose_copy/rgbd_dataset_freiburg3_walking_static_seq_390_419/traj/gs_camera_poses.pt"
+                pose_ckpt = torch.load(pose_ckpt, map_location=args.device)
+                global_cam_poses_est = pose_ckpt['global_cam_poses_est']
+                runner.trainset.set_camera_to_world(global_cam_poses_est)
+                runner.train_gs_doma(args.sh_degree,initial_train_step = 1000) # inited splat, doma doma optimizer, doma scheduler
+                return None, None, None
+            elif args.draw_frame:
+                runner.draw_frame(0,device=runner.device,opt=args)
+                return None, None, None
+            else:
+                gs_pose = runner.train()['global_cam_poses_est']
         # transform back
         gs_pose = torch.cat([torch.Tensor(pose).unsqueeze(0) for pose in gs_pose], dim=0)
         gs_pose_R = gs_pose[:,:3, :3]
@@ -496,6 +516,7 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
 
         runner = Runner(local_rank=args.local_rank, world_rank=args.world_rank, world_size=args.world_size, opt=args)
 
+
         if args.use_monst3r_intermediate:
             print('use monst3r intermediate pointmaps')
             if "gs_use_pts" not in locals():
@@ -520,9 +541,32 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
                     del imgs, pairs, output
                     gc.collect()
 
-            refined_pose = runner.train(monst3r_pointmap = gs_use_pts, monst3r_pointcolor = gs_use_colors)['global_cam_poses_est']
+            if args.test_gs:
+                pose_ckpt = "/scratch/yy561/monst3r/paper_example/tum_rgb_refine_pose_copy/rgbd_dataset_freiburg3_walking_static_seq_390_419/traj/gs_camera_poses.pt"
+                pose_ckpt = torch.load(pose_ckpt, map_location=args.device)
+                global_cam_poses_est = pose_ckpt['global_cam_poses_est']
+                runner.trainset.set_camera_to_world(global_cam_poses_est)
+                runner.train_gs_doma(args.sh_degree,initial_train_step = 1000) # inited splat, doma doma optimizer, doma scheduler
+                return None, None, None
+            elif args.draw_frame:
+                runner.draw_frame(0,device=runner.device)
+                return None, None, None
+            else:
+                refined_pose = runner.train(monst3r_pointmap = gs_use_pts, monst3r_pointcolor = gs_use_colors)['global_cam_poses_est']
         else:
-            refined_pose = runner.train()['global_cam_poses_est']
+            if args.test_gs:
+                pose_ckpt = "/scratch/yy561/monst3r/paper_example/tum_rgb_refine_pose_copy/rgbd_dataset_freiburg3_walking_static_seq_390_419/traj/gs_camera_poses.pt"
+                pose_ckpt = torch.load(pose_ckpt, map_location=args.device)
+                global_cam_poses_est = pose_ckpt['global_cam_poses_est']
+                runner.trainset.set_camera_to_world(global_cam_poses_est)
+                runner.train_gs_doma_sem(args.sh_degree,initial_train_step = 8000) # inited splat, doma doma optimizer, doma scheduler
+                # runner.train_gs_doma(args.sh_degree,global_cam_poses_est)
+                return None, None, None
+            elif args.draw_frame:
+                runner.draw_frame(0,device=runner.device,opt=args)
+                return None, None, None
+            else:
+                refined_pose = runner.train()['global_cam_poses_est']
         # refined_pose = runner.train()['global_cam_poses_est']
         # transform back
         refined_pose = torch.cat([torch.Tensor(pose).unsqueeze(0) for pose in refined_pose], dim=0)
@@ -890,7 +934,6 @@ if __name__ == '__main__':
         else:   # input_dir is a video
             input_files = [args.input_dir]
             recon_fun = functools.partial(get_reconstructed_scene, args, tmpdirname, model, args.device, args.silent, args.image_size)
-
             # Call the function with default parameters
             scene, outfile, imgs = recon_fun(
                 filelist=input_files,

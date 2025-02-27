@@ -6,7 +6,7 @@ import time
 import json
 import glob
 
-def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None):
+def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None,gt_quats=None):
     from dust3r.utils.vo_eval import load_traj, eval_metrics, plot_trajectory, save_trajectory_tum_format, process_directory, calculate_averages
     from evo.core.trajectory import PoseTrajectory3D,PosePath3D
 
@@ -21,14 +21,15 @@ def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None):
     traj_cf3dgs = None
     traj_droid = None
     # load the ground truth poses
-    if gt_pose is None:
-        gt_path = f'{output_dir}/{seq}/cam_poses.npy'
-        gt_pose = np.load(gt_path)
-    else:
-        gt_pose = np.array(gt_pose)
-        gt_path = f'{output_dir}/{seq}/cam_poses.npy'
-        np.save(gt_path, gt_pose)
-    timestamps_mat = np.arange(gt_pose.shape[0]).astype(float)
+    # if gt_pose is None:
+    #     gt_path = f'{output_dir}/{seq}/cam_poses.npy'
+    #     gt_pose = np.load(gt_path)
+    # else:
+    #     gt_pose = np.array(gt_pose)
+    #     gt_path = f'{output_dir}/{seq}/cam_poses.npy'
+    #     np.save(gt_path, gt_pose)
+    
+    timestamps_mat = np.arange(30).astype(float)
 
     # monst3r pose
     if os.path.exists(monst3r_traj_path):
@@ -45,6 +46,8 @@ def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None):
         with open(refined_traj_path, 'r') as f:
             refined_pose = f.readlines()
             refined_pose = np.array([list(map(float,pose.split())) for pose in refined_pose])
+            # turn tu wxyz
+            refined_pose[:,4:] = refined_pose[:,[7,4,5,6]]
         pose_refined = PosePath3D(
             positions_xyz=refined_pose[:,1:4],
             orientations_quat_wxyz=refined_pose[:,4:])
@@ -54,6 +57,7 @@ def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None):
         with open(gs_traj_path, 'r') as f:
             gs_pose = f.readlines()
             gs_pose = np.array([list(map(float,pose.split())) for pose in gs_pose])
+            gs_pose[:,4:] = gs_pose[:,[7,4,5,6]]
         pose_gs = PosePath3D(
             positions_xyz=gs_pose[:,1:4],
             orientations_quat_wxyz=gs_pose[:,4:])
@@ -73,9 +77,18 @@ def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None):
             orientations_quat_wxyz=droid_pose[:,3:],
             timestamps=np.array(timestamps_mat))
     
-        
-    pose_gt = PosePath3D(poses_se3=gt_pose)
-    traj_gt = PoseTrajectory3D(poses_se3=pose_gt.poses_se3, timestamps=timestamps_mat)
+    if gt_quats is not None: 
+        gt_quats= np.array(gt_quats)
+        # save traj
+        gt_quats_path = f'{output_dir}/{seq}/cam_poses_traj.npy'
+        np.save(gt_quats_path, gt_quats)
+        traj_gt = PoseTrajectory3D(
+            positions_xyz=gt_quats[:,:3],
+            orientations_quat_wxyz=gt_quats[:,3:],
+            timestamps=np.array(timestamps_mat))
+    else:
+        pose_gt = PosePath3D(poses_se3=gt_pose)
+        traj_gt = PoseTrajectory3D(poses_se3=pose_gt.poses_se3, timestamps=timestamps_mat)
 
     if os.path.exists(monst3r_traj_path):
         monst3r_ate, monst3r_rpe_trans, monst3r_rpe_rot = eval_metrics(
@@ -174,6 +187,7 @@ if __name__ == '__main__':
         seq_ind = save['selected_frames']
         gt_cam_poses = save['cam_poses']
         dataset_name = save['dataset']
+        gt_cam_quats = save['cam_quats']
         # num_seq = len(os.listdir('/scratch/yy561/monst3r/batch_test_results_0.07_puregs/{}'.format(dataset_name)))
         # output_dir = '/scratch/yy561/monst3r/batch_test_results_0.07_puregs/{}'.format(dataset_name)
         # num_seq = len(os.listdir('/scratch/yy561/monst3r/tum_result_test'))-1
@@ -197,17 +211,17 @@ if __name__ == '__main__':
                 continue
             if args.static:
                 if not "static" in dataset_name[ind]:
-                    if not "xyz" in dataset_name[ind]:
+                    # if not "xyz" in dataset_name[ind]:
                         continue
                 
 
-
+            # evaluate the camera poses
             try:
                 eval_monst3r_gs_poses('{}_seq_{}_{}'.format(dataset_name[ind],seq_ind[ind][0], seq_ind[ind][-1]), 
-                            output_dir, gt_pose=gt_cam_poses[ind])
+                            output_dir, gt_pose=gt_cam_poses[ind], gt_quats = gt_cam_quats[ind])
             except Exception as e:
                 eval_monst3r_gs_poses('{}_seq_{}_{}'.format(dataset_name[ind],seq_ind[ind][0], seq_ind[ind][-1]), 
-                            output_dir, gt_pose=gt_cam_poses[ind]) 
+                            output_dir, gt_pose=gt_cam_poses[ind], gt_quats = gt_cam_quats[ind]) 
 
             
             # collect the overall ATE
@@ -244,32 +258,33 @@ if __name__ == '__main__':
 
     # with open(os.path.join(output_dir, "overall_ate.json"), 'w') as f:
     if args.static:
-        file_name_overall_ate = "static_ate.json"
+        file_name_overall_ate = "static_ate3.json"
         if args.xyz:
             file_name_overall_ate = "static_xyz_ate.json"
     else:
         file_name_overall_ate = "overall_ate.json"
+    print('saving to ', os.path.join(output_dir, file_name_overall_ate))
     with open(os.path.join(output_dir, file_name_overall_ate), 'w') as f:
         json.dump({
             "monst3r_ate": np.format_float_positional(np.mean(ate_overall_monst3r) if not None in ate_overall_monst3r else None, precision=4, unique=False, fractional=False, trim='k'),
-            "refined_ate": np.format_float_positional(np.mean(ate_overall_refined) if not None in ate_overall_refined else None, precision=4, unique=False, fractional=False, trim='k'),
-            "gs_ate": np.format_float_positional(np.mean(ate_overall_gs) if not None in ate_overall_gs else None, precision=4, unique=False, fractional=False, trim='k'),
-
             "monst3r_rpe_rot": np.format_float_positional(np.mean(rpe_rot_monst3r) if not None in rpe_rot_monst3r else None, precision=4, unique=False, fractional=False, trim='k'),
-            "refined_rpe_rot": np.format_float_positional(np.mean(rpe_rot_refined) if not None in rpe_rot_refined else None, precision=4, unique=False, fractional=False, trim='k'),
-            "gs_rpe_rot": np.format_float_positional(np.mean(rpe_rot_gs) if not None in rpe_rot_gs else None, precision=4, unique=False, fractional=False, trim='k'),
-
             "monst3r_rpe_trans": np.format_float_positional(np.mean(rpe_trans_monst3r) if not None in rpe_trans_monst3r else None, precision=4, unique=False, fractional=False, trim='k'),
+
+            "refined_ate": np.format_float_positional(np.mean(ate_overall_refined) if not None in ate_overall_refined else None, precision=4, unique=False, fractional=False, trim='k'),
+            "refined_rpe_rot": np.format_float_positional(np.mean(rpe_rot_refined) if not None in rpe_rot_refined else None, precision=4, unique=False, fractional=False, trim='k'),
             "refined_rpe_trans": np.format_float_positional(np.mean(rpe_trans_refined) if not None in rpe_trans_refined else None, precision=4, unique=False, fractional=False, trim='k'),
+
+            "gs_ate": np.format_float_positional(np.mean(ate_overall_gs) if not None in ate_overall_gs else None, precision=4, unique=False, fractional=False, trim='k'),
+            "gs_rpe_rot": np.format_float_positional(np.mean(rpe_rot_gs) if not None in rpe_rot_gs else None, precision=4, unique=False, fractional=False, trim='k'),
             "gs_rpe_trans": np.format_float_positional(np.mean(rpe_trans_gs) if not None in rpe_trans_gs else None, precision=4, unique=False, fractional=False, trim='k'),
         
             # "cf3dgs_ate": np.format_float_positional(np.mean(ate_overall_cf3dgs) if not None in ate_overall_cf3dgs else None, precision=4, unique=False, fractional=False, trim='k'),
             # "cf3dgs_rpe_rot": np.format_float_positional(np.mean(rpe_rot_cf3dgs) if not None in rpe_rot_cf3dgs else None, precision=4, unique=False, fractional=False, trim='k'),
             # "cf3dgs_rpe_trans": np.format_float_positional(np.mean(rpe_trans_cf3dgs) if not None in rpe_trans_cf3dgs else None, precision=4, unique=False, fractional=False, trim='k'),
 
-            "droid_ate": np.format_float_positional(np.mean(ate_overall_droid) if not None in ate_overall_droid else None, precision=4, unique=False, fractional=False, trim='k'),
-            "droid_rpe_rot": np.format_float_positional(np.mean(rpe_rot_droid) if not None in rpe_rot_droid else None, precision=4, unique=False, fractional=False, trim='k'),
-            "droid_rpe_trans": np.format_float_positional(np.mean(rpe_trans_droid) if not None in rpe_trans_droid else None, precision=4, unique=False, fractional=False, trim='k')
+            # "droid_ate": np.format_float_positional(np.mean(ate_overall_droid) if not None in ate_overall_droid else None, precision=4, unique=False, fractional=False, trim='k'),
+            # "droid_rpe_rot": np.format_float_positional(np.mean(rpe_rot_droid) if not None in rpe_rot_droid else None, precision=4, unique=False, fractional=False, trim='k'),
+            # "droid_rpe_trans": np.format_float_positional(np.mean(rpe_trans_droid) if not None in rpe_trans_droid else None, precision=4, unique=False, fractional=False, trim='k')
         
         }, f,indent=4)
     #find where is None

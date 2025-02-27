@@ -1270,7 +1270,7 @@ class Runner:
 
         self.strategy = DefaultStrategy(
                 verbose=False,
-                scene_scale=self.scene_scale,
+                # scene_scale=self.scene_scale,
                 prune_opa=opt.prune_opa,
                 grow_grad2d=opt.grow_grad2d,
                 grow_scale3d=opt.grow_scale3d,
@@ -1292,8 +1292,8 @@ class Runner:
         # train a first frame
         height,width = self.trainset[0]['image'].shape[0:2]
         
-        if opt.doma:
-            doma, doma_optimizer, doma_scheduler= self.init_doma(seq_len=len(self.trainset), device=self.device, max_steps = eval_max_step)
+        # if opt.doma:
+        doma, doma_optimizer, doma_scheduler= self.init_doma(seq_len=len(self.trainset), device=self.device, max_steps = eval_max_step)
 
         current_index = 0
         for step in pbar:
@@ -1383,8 +1383,8 @@ class Runner:
             doma_optimizer.zero_grad(set_to_none=True)
             doma_scheduler.step()
 
-            if step == 3000:
-                self.eval_all(step, self.trainset, torch.stack([torch.Torch(cam_pose).to(self.device) for cam_pose in global_cam_poses_est]).to(self.device),doma_eval=True,doma=doma)
+            # if step == 3000:
+            #     self.eval_all(step, self.trainset, torch.stack([torch.Torch(cam_pose).to(self.device) for cam_pose in global_cam_poses_est]).to(self.device),doma_eval=True,doma=doma)
         # render
         self.eval_all(current_index, self.trainset, torch.stack([torch.Tensor(cam_pose).to(self.device) for cam_pose in global_cam_poses_est]).to(self.device),doma_eval=True,doma=doma)
         # save gs
@@ -1754,17 +1754,17 @@ class Runner:
             )
             loss = l1loss * (1.0 - opt.ssim_lambda) + ssimloss * opt.ssim_lambda
 
-            if opt.lambda_depth > 0:
-                with torch.no_grad():
-                    A = torch.cat([depths_0, torch.ones_like(depths_0)], dim=-1) # [B, 2]
-                    X = torch.linalg.lstsq(A, depths_0).solution # [2, 1]
-                    valid_pred_depth = A @ X # [B, 1]
+            # if opt.lambda_depth > 0:
+            #     with torch.no_grad():
+            #         A = torch.cat([depths_0, torch.ones_like(depths_0)], dim=-1) # [B, 2]
+            #         X = torch.linalg.lstsq(A, depths_0).solution # [2, 1]
+            #         valid_pred_depth = A @ X # [B, 1]
 
-                    A_gt = torch.cat([frame_0_depth_map, torch.ones_like(frame_0_depth_map)], dim=-1) # [B, 2]
-                    X_gt = torch.linalg.lstsq(A_gt, frame_0_depth_map).solution # [2, 1]
-                    valid_gt_depth = A_gt @ X_gt # [B, 1]
-                lambda_depth = self.opt.lambda_depth #* min(1, self.global_step / self.opt.iters)
-                loss = loss + lambda_depth * F.mse_loss(valid_pred_depth, valid_gt_depth)
+            #         A_gt = torch.cat([frame_0_depth_map, torch.ones_like(frame_0_depth_map)], dim=-1) # [B, 2]
+            #         X_gt = torch.linalg.lstsq(A_gt, frame_0_depth_map).solution # [2, 1]
+            #         valid_gt_depth = A_gt @ X_gt # [B, 1]
+            #     lambda_depth = self.opt.lambda_depth #* min(1, self.global_step / self.opt.iters)
+            #     loss = loss + lambda_depth * F.mse_loss(valid_pred_depth, valid_gt_depth)
             # if opt.depth_loss:
             #     depthloss = F.l1_loss(depths_0.squeeze(-1), depthmap_gt)
             desc = f"loss={loss.item():.3f}| " f"sh degree={sh_degree_to_use}| "
@@ -1823,28 +1823,29 @@ class Runner:
             )
 
 
-            if 'labels' in self.splats.keys():
-                mask = ~self.trainset[current_index]['mask'].to(self.device) 
-                gt_pixel = gt_pixel*mask
-                colors_dynamic = colors*mask
-                l1loss_dynamic = F.l1_loss(colors_dynamic, gt_pixel)
-                loss = 0.7*l1loss_dynamic + 0.3*l1loss
-            else:
-                loss = l1loss * (1.0 - opt.ssim_lambda) + ssimloss * opt.ssim_lambda
+            # if 'labels' in self.splats.keys():
+            #     mask = ~self.trainset[current_index]['mask'].to(self.device) 
+            #     gt_pixel = gt_pixel*mask
+            #     colors_dynamic = colors*mask
+            #     l1loss_dynamic = F.l1_loss(colors_dynamic, gt_pixel)
+            #     loss = 0.7*l1loss_dynamic + 0.3*l1loss
+            # else:
+            #     loss = l1loss * (1.0 - opt.ssim_lambda) + ssimloss * opt.ssim_lambda
+            loss = l1loss * (1.0 - opt.ssim_lambda) + ssimloss * opt.ssim_lambda
 
-            if opt.lambda_depth > 0:
-                with torch.no_grad():
-                    A = torch.cat([depths, torch.ones_like(depths)], dim=-1) # [B, 2]
-                    X = torch.linalg.lstsq(A, depths).solution # [2, 1]
-                    valid_pred_depth = A @ X # [B, 1]
+            # if opt.lambda_depth > 0:
+            #     with torch.no_grad():
+            #         A = torch.cat([depths, torch.ones_like(depths)], dim=-1) # [B, 2]
+            #         X = torch.linalg.lstsq(A, depths).solution # [2, 1]
+            #         valid_pred_depth = A @ X # [B, 1]
 
-                    gt_depth = self.trainset[current_index]['depth_map'].unsqueeze(-1).unsqueeze(0).to(self.device)
+            #         gt_depth = self.trainset[current_index]['depth_map'].unsqueeze(-1).unsqueeze(0).to(self.device)
 
-                    A_gt = torch.cat([gt_depth, torch.ones_like(gt_depth)], dim=-1) # [B, 2]
-                    X_gt = torch.linalg.lstsq(A_gt, gt_depth).solution # [2, 1]
-                    valid_gt_depth = A_gt @ X_gt # [B, 1]
-                lambda_depth = self.opt.lambda_depth #* min(1, self.global_step / self.opt.iters)
-                loss = loss + lambda_depth * F.mse_loss(valid_pred_depth, valid_gt_depth)
+            #         A_gt = torch.cat([gt_depth, torch.ones_like(gt_depth)], dim=-1) # [B, 2]
+            #         X_gt = torch.linalg.lstsq(A_gt, gt_depth).solution # [2, 1]
+            #         valid_gt_depth = A_gt @ X_gt # [B, 1]
+            #     lambda_depth = self.opt.lambda_depth #* min(1, self.global_step / self.opt.iters)
+            #     loss = loss + lambda_depth * F.mse_loss(valid_pred_depth, valid_gt_depth)
 
 
             # if opt.depth_loss:
@@ -1879,7 +1880,11 @@ class Runner:
                     packed=opt.packed,
                 )
             # breakpoint()
-            for optimizer in self.optimizers.values():
+            # for optimizer in self.optimizers.values():
+            for name, optimizer in self.optimizers.items():
+                # leave labels out 
+                if name == 'labels' :
+                    continue
                 optimizer.step()
                 optimizer.zero_grad(set_to_none=True)
             for optimizer in self.app_optimizers:

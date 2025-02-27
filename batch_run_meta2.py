@@ -33,21 +33,31 @@ import os
 
 # cmd = "cp -r /scratch/yy561/monst3r/pointodyssey/monst3r/* pointodyssey/refine_pose/"
 # os.system(cmd)
-cmd = "python demo_copy.py --input_dir data/pointodyssey.pkl --output_dir pointodyssey/refine_pose/ --gs_pose --gs_refine"
+###------- 
+# cmd = "python demo_copy.py --input_dir data/pointodyssey.pkl --output_dir pointodyssey/refine_pose/ --gs_pose --gs_refine"
+# os.system(cmd)
+
+# cmd = "cp -r /scratch/yy561/monst3r/pointodyssey/refine_pose/* pointodyssey/refine_pose_intermediate/"
+# os.system(cmd)
+# cmd = "python demo_copy.py --input_dir  data/pointodyssey.pkl --output_dir pointodyssey/refine_pose_intermediate/ --gs_pose --gs_refine --use_monst3r_intermediate"
+# os.system(cmd)
+
+
+# # dino image, compare with 3 dim and 6 dim, compare to gs_pose_own, as they don't relie on the intermediate output of monst3r
+# cmd = "cp -r /scratch/yy561/monst3r/pointodyssey/refine_pose/* pointodyssey/dino_refine_pose_3/"
+# os.system(cmd)
+# cmd = "python demo_copy.py --input_dir  data/pointodyssey.pkl --output_dir pointodyssey/refine_pose_dino_3/ --gs_pose --gs_refine --dino --dino_dim 3"
+# os.system(cmd)
+# cmd = "cp -r /scratch/yy561/monst3r/pointodyssey/refine_pose/* pointodyssey/dino_refine_pose_16/"
+# os.system(cmd)
+# cmd = "python demo_copy.py --input_dir  data/pointodyssey.pkl --output_dir pointodyssey/refine_pose_dino_16/ --gs_pose --gs_refine --dino --dino_dim 16"
+# os.system(cmd)
+# os.system('cp -r tum_0ssim/tum_rgb_refine_pose/ tum_0ssim/tum_rgb_refine_pose_dino16_nocamera/')
+
+cmd = "CUDA_VISIBLE_DEVICES=0 python demo_copy.py --input_dir data/tum/tum_cam_poses_static_gt.pkl  --output_dir tum_0ssim/tum_rgb_refine_pose_dino16_nocamera/ --gs_pose --gs_refine --dino --dino_dim 16 --camera_smoothness_lambda 0"
+os.system(cmd)
+# os.system('cp -r tum_0ssim/tum_rgb_refine_pose tum_0ssim/tum_rgb_dino_refine_pose_16_batch10/')
+
+cmd = "CUDA_VISIBLE_DEVICES=0 python demo_copy.py --input_dir data/tum/tum_cam_poses_static_gt.pkl --output_dir tum_0ssim/tum_rgb_dino_refine_pose_16_batch10/ --gs_pose --gs_refine --batch_size 10 --dino --dino_dim 16"
 os.system(cmd)
 
-cmd = "cp -r /scratch/yy561/monst3r/pointodyssey/refine_pose/* pointodyssey/refine_pose_intermediate/"
-os.system(cmd)
-cmd = "python demo_copy.py --input_dir  data/pointodyssey.pkl --output_dir pointodyssey/refine_pose_intermediate/ --gs_pose --gs_refine --use_monst3r_intermediate"
-os.system(cmd)
-
-
-# dino image, compare with 3 dim and 6 dim, compare to gs_pose_own, as they don't relie on the intermediate output of monst3r
-cmd = "cp -r /scratch/yy561/monst3r/pointodyssey/refine_pose/* pointodyssey/dino_refine_pose_3/"
-os.system(cmd)
-cmd = "python demo_copy.py --input_dir  data/pointodyssey.pkl --output_dir pointodyssey/refine_pose_dino_3/ --gs_pose --gs_refine --dino --dino_dim 3"
-os.system(cmd)
-cmd = "cp -r /scratch/yy561/monst3r/pointodyssey/refine_pose/* pointodyssey/dino_refine_pose_16/"
-os.system(cmd)
-cmd = "python demo_copy.py --input_dir  data/pointodyssey.pkl --output_dir pointodyssey/refine_pose_dino_16/ --gs_pose --gs_refine --dino --dino_dim 16"
-os.system(cmd)

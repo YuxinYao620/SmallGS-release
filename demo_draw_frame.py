@@ -21,8 +21,8 @@ from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
 from dust3r.utils.viz_demo import convert_scene_output_to_glb, get_dynamic_mask_from_pairviewer
 import matplotlib.pyplot as pl
 import time
-# from gs.gs_diff_copy import Runner
-from gs.gs_diff import Runner
+from gs.gs_diff_copy import Runner
+# from gs.gs_diff import Runner
 from pathlib import Path
 from evo.core.trajectory import PoseTrajectory3D,PosePath3D
 import copy
@@ -84,12 +84,12 @@ def get_args_parser():
     parser.add_argument('--sh_degree_interval', type=int, default=1000, help="Turn on another SH degree every this steps")
     parser.add_argument('--refine_start_iter', type=int, default=500, help="Start refining GSs after this iteration")
     parser.add_argument('--refine_stop_iter', type=int, default=15000, help="Stop refining GSs after this iteration")
-    parser.add_argument('--reset_every', type=int, default=30000, help="Reset opacities every this steps")
+    parser.add_argument('--reset_every', type=int, default=3000, help="Reset opacities every this steps")
     parser.add_argument('--refine_every', type=int, default=100, help="Refine GSs every this steps")
 
     parser.add_argument('--init_opa', type=float, default=0.1, help="Initial opacity of GS")
     parser.add_argument('--init_scale', type=float, default=1.0, help="Initial scale of GS")
-    parser.add_argument('--ssim_lambda', type=float, default=0.2, help="Weight for SSIM loss")
+    parser.add_argument('--ssim_lambda', type=float, default=0.0, help="Weight for SSIM loss")
     parser.add_argument('--near_plane', type=float, default=0.01, help="Near plane clipping distance")
     parser.add_argument('--far_plane', type=float, default=1e10, help="Far plane clipping distance")
     parser.add_argument('--prune_opa', type=float, default=0.005, help="GSs with opacity below this value will be pruned")
@@ -144,7 +144,7 @@ def get_args_parser():
     parser.add_argument('--deform_lr_max_steps', type=int, default=5000, help="Max steps for cf3dgs deformation learning rate")
 
     parser.add_argument('--canny_opt', action='store_true', help="Enable canny optimization")
-    parser.add_argument('--camera_smoothness_loss', action='store_true', default="True",help="Enable camera smoothness loss")
+    parser.add_argument('--camera_smoothness_loss', action='store_true', default=True,help="Enable camera smoothness loss")
     parser.add_argument('--camera_smoothness_lambda', type=float, default=0.5, help="Weight for camera smoothness loss")
 
     parser.add_argument('--local_rank',type=int, default=0)
@@ -398,14 +398,34 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         args.camera_smoothness_lambda = 1
         # args.datatype = 'custom'
         args.datatype = 'monst3r' if "own" not in args.output_dir else 'custom'
-
+        if args.test_gs:
+            args.datatype = 'custom'
         runner = Runner(local_rank=args.local_rank, world_rank=args.world_rank, world_size=args.world_size, opt=args)
         
         if args.use_monst3r_intermediate:
             print('using monst3r intermediate pointmaps')
             gs_pose = runner.train(monst3r_pointmap = gs_use_pts, monst3r_pointcolor = gs_use_colors)['global_cam_poses_est']
         else:
-            gs_pose = runner.train()['global_cam_poses_est']
+            # if args.test_gs:
+            #     pose_ckpt = "/scratch/yy561/monst3r/paper_example/tum_rgb_refine_pose_copy/rgbd_dataset_freiburg3_walking_static_seq_390_419/traj/gs_camera_poses.pt"
+            #     pose_ckpt = torch.load(pose_ckpt, map_location=args.device)
+            #     global_cam_poses_est = pose_ckpt['global_cam_poses_est']
+            #     runner.trainset.set_camera_to_world(global_cam_poses_est)
+            #     runner.train_gs_doma_sem(args.sh_degree,initial_train_step = 12000) # inited splat, doma doma optimizer, doma scheduler
+            #     # runner.train_gs_doma(args.sh_degree,global_cam_poses_est)
+            #     return None, None, None
+            if args.test_gs:
+                pose_ckpt = "/scratch/yy561/monst3r/paper_example/tum_rgb_refine_pose_copy/rgbd_dataset_freiburg3_walking_static_seq_390_419/traj/gs_camera_poses.pt"
+                pose_ckpt = torch.load(pose_ckpt, map_location=args.device)
+                global_cam_poses_est = pose_ckpt['global_cam_poses_est']
+                runner.trainset.set_camera_to_world(global_cam_poses_est)
+                runner.train_gs_doma(args.sh_degree,initial_train_step = 1000) # inited splat, doma doma optimizer, doma scheduler
+                return None, None, None
+            elif args.draw_frame:
+                runner.draw_frame(0,device=runner.device,opt=args)
+                return None, None, None
+            else:
+                gs_pose = runner.train()['global_cam_poses_est']
         # transform back
         gs_pose = torch.cat([torch.Tensor(pose).unsqueeze(0) for pose in gs_pose], dim=0)
         gs_pose_R = gs_pose[:,:3, :3]
@@ -496,6 +516,7 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
 
         runner = Runner(local_rank=args.local_rank, world_rank=args.world_rank, world_size=args.world_size, opt=args)
 
+
         if args.use_monst3r_intermediate:
             print('use monst3r intermediate pointmaps')
             if "gs_use_pts" not in locals():
@@ -520,9 +541,32 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
                     del imgs, pairs, output
                     gc.collect()
 
-            refined_pose = runner.train(monst3r_pointmap = gs_use_pts, monst3r_pointcolor = gs_use_colors)['global_cam_poses_est']
+            if args.test_gs:
+                pose_ckpt = "/scratch/yy561/monst3r/paper_example/tum_rgb_refine_pose_copy/rgbd_dataset_freiburg3_walking_static_seq_390_419/traj/gs_camera_poses.pt"
+                pose_ckpt = torch.load(pose_ckpt, map_location=args.device)
+                global_cam_poses_est = pose_ckpt['global_cam_poses_est']
+                runner.trainset.set_camera_to_world(global_cam_poses_est)
+                runner.train_gs_doma(args.sh_degree,initial_train_step = 1000) # inited splat, doma doma optimizer, doma scheduler
+                return None, None, None
+            elif args.draw_frame:
+                runner.draw_frame(0,device=runner.device)
+                return None, None, None
+            else:
+                refined_pose = runner.train(monst3r_pointmap = gs_use_pts, monst3r_pointcolor = gs_use_colors)['global_cam_poses_est']
         else:
-            refined_pose = runner.train()['global_cam_poses_est']
+            if args.test_gs:
+                pose_ckpt = "/scratch/yy561/monst3r/paper_example/tum_rgb_refine_pose_copy/rgbd_dataset_freiburg3_walking_static_seq_390_419/traj/gs_camera_poses.pt"
+                pose_ckpt = torch.load(pose_ckpt, map_location=args.device)
+                global_cam_poses_est = pose_ckpt['global_cam_poses_est']
+                runner.trainset.set_camera_to_world(global_cam_poses_est)
+                runner.train_gs_doma_sem(args.sh_degree,initial_train_step = 8000) # inited splat, doma doma optimizer, doma scheduler
+                # runner.train_gs_doma(args.sh_degree,global_cam_poses_est)
+                return None, None, None
+            elif args.draw_frame:
+                runner.draw_frame(0,device=runner.device,opt=args)
+                return None, None, None
+            else:
+                refined_pose = runner.train()['global_cam_poses_est']
         # refined_pose = runner.train()['global_cam_poses_est']
         # transform back
         refined_pose = torch.cat([torch.Tensor(pose).unsqueeze(0) for pose in refined_pose], dim=0)
@@ -701,12 +745,8 @@ def main_demo(tmpdirname, model, device, image_size, server_name, server_port, s
 
 if __name__ == '__main__':
     # set random seed
-    # seed = 42
-    # torch.manual_seed(seed)
-    # np.random.seed(seed)
-    # torch.cuda.manual_seed_all(seed)
-    # torch.backends.cudnn.deterministic = True
-    # torch.backends.cudnn.benchmark = False
+    torch.manual_seed(42)
+    np.random.seed(42)
 
     parser = get_args_parser()
     args = parser.parse_args()
@@ -890,7 +930,6 @@ if __name__ == '__main__':
         else:   # input_dir is a video
             input_files = [args.input_dir]
             recon_fun = functools.partial(get_reconstructed_scene, args, tmpdirname, model, args.device, args.silent, args.image_size)
-
             # Call the function with default parameters
             scene, outfile, imgs = recon_fun(
                 filelist=input_files,
