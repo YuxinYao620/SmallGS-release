@@ -78,7 +78,7 @@ def load_camera_pose(pose_path, device):
     # base_dir = "/home/yuxinyao/batch-cf3dgs/paper_example/tum_rgb_refine_pose_copy/rgbd_dataset_freiburg3_walking_static_seq_390_419"
 
     # pred_path = os.path.join(pose_path, "pred_traj_monst3r_for_refine.txt")
-    pred_path = os.path.join(pose_path, "dino.txt")
+    pred_path = os.path.join(pose_path, "gs_pose.txt")
 
     # gt_path = os.path.join(pose_path, "cam_poses.npy")
     # gt_pose = torch.Tensor(np.load(gt_path))
@@ -92,12 +92,17 @@ def load_camera_pose(pose_path, device):
         pred_pose[:,4:] = pred_pose[:,[7,4,5,6]]
 
     # align gt and pred
-    gt_path = os.path.join(pose_path, "cam_poses_traj.npy") 
+    # gt_path = os.path.join(pose_path, "cam_relative_traj.npy") 
+    gt_path = os.path.join(pose_path, "cam_poses_traj.npy")
     gt_pose = torch.Tensor(np.load(gt_path))
+    # gt_pose[:,[4,5,6]] = -gt_pose[:,[4,5,6]]
 
     # pose_gt = PosePath3D(poses_se3=gt_pose)
     pose_gt = PosePath3D( positions_xyz=gt_pose[:,0:3],
             orientations_quat_wxyz=gt_pose[:,[3,4,5,6]])
+            # orientations_quat_wxyz=gt_pose[:,[4,5,6,3]])
+            # orientations_quat_wxyz=gt_pose[:,[5,6,3,4]])
+            # orientations_quat_wxyz=gt_pose[:,[6,3,4,5]])
     pose_pred = PosePath3D(
             positions_xyz=pred_pose[:,1:4],
             orientations_quat_wxyz=pred_pose[:,4:])
@@ -124,6 +129,13 @@ def load_camera_pose(pose_path, device):
     
 
     mean_point = np.zeros(3)
+    # difference in quaternion to degree    
+    r1 = R.from_quat(gt_quats.cpu().numpy())
+    r2 = R.from_quat(pred_quats.cpu().numpy())
+    relative_rot = r1.inv() * r2
+    angle_rad = relative_rot.magnitude()
+    angle_deg = np.degrees(angle_rad)
+    print("relative rotation in degree", angle_deg)
     
     monst3r_path = os.path.join(pose_path, "pred_traj_monst3r_for_refine.txt")
     with open(monst3r_path, 'r') as f:
@@ -353,7 +365,7 @@ def main(local_rank: int, world_rank, world_size: int, args):
             # Create a coordinate frame and label.
             # frame = client.scene.add_frame(f"/frame_{i}", wxyz=wxyz, position=position)
             # client.scene.add_label(f"/frame_{i}/label", text=f"Frame {i}")
-            frame = client.scene.add_camera_frustum(name=f"/frame_{i}",fov=79, aspect=1.2,color=color, wxyz=wxyz, position=position, scale=0.0000000003)
+            frame = client.scene.add_camera_frustum(name=f"/frame_{i}",fov=79, aspect=1.2,color=color, wxyz=wxyz, position=position, scale=0.003)
             # client.scene.add_label(f"/frame_{i}/label", text=f"Frame {i}")
 
             if pred:

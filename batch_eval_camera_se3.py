@@ -11,8 +11,8 @@ def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None,gt_quats=None):
     from evo.core.trajectory import PoseTrajectory3D,PosePath3D
 
     monst3r_traj_path  = f'{output_dir}/{seq}/pred_traj.txt'
-    refined_traj_path = f'{output_dir}/{seq}/refined_pose.txt'
-    gs_traj_path = f'{output_dir}/{seq}/gs_pose.txt'
+    refined_traj_path = f'{output_dir}/{seq}/refined_pose_matrix.txt'
+    gs_traj_path = f'{output_dir}/{seq}/gs_pose_matrix.txt'
     cf3dgs_traj_path = f'{output_dir}/{seq}/cf3dgs.txt'
     droid_traj_path = f'{output_dir}/{seq}/droid_traj.npy'
     traj_monster = None
@@ -42,25 +42,38 @@ def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None,gt_quats=None):
             orientations_quat_wxyz=monster_pose[:,4:])
         traj_monster = PoseTrajectory3D(poses_se3=pose_monster.poses_se3, timestamps=timestamps_mat)
     # refined pose
+    import re
+    se3_matrices = np.zeros((30, 4, 4))
     if os.path.exists(refined_traj_path):
         with open(refined_traj_path, 'r') as f:
-            refined_pose = f.readlines()
-            refined_pose = np.array([list(map(float,pose.split())) for pose in refined_pose])
-            # turn tu wxyz
-            refined_pose[:,4:] = refined_pose[:,[7,4,5,6]]
-        pose_refined = PosePath3D(
-            positions_xyz=refined_pose[:,1:4],
-            orientations_quat_wxyz=refined_pose[:,4:])
+            pose_refined = f.readlines()
+            for line in pose_refined:
+                line = line.strip()
+                match = re.match(r"(\d+)\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]", line)
+                if match:
+                    index = int(match.group(1))
+                    matrix_elements = [list(map(float, match.group(i).split())) for i in range(2, 6)]
+                    se3_matrices[index] = np.array(matrix_elements)
+            pose_refined = PosePath3D(poses_se3=se3_matrices)
+
         traj_refined = PoseTrajectory3D(poses_se3=pose_refined.poses_se3, timestamps=timestamps_mat)
-    
-    if os.path.exists(gs_traj_path):
-        with open(gs_traj_path, 'r') as f:
-            gs_pose = f.readlines()
-            gs_pose = np.array([list(map(float,pose.split())) for pose in gs_pose])
-            gs_pose[:,4:] = gs_pose[:,[7,4,5,6]]
-        pose_gs = PosePath3D(
-            positions_xyz=gs_pose[:,1:4],
-            orientations_quat_wxyz=gs_pose[:,4:])
+    se3_matrices = np.zeros((30, 4, 4))
+    with open(gs_traj_path, 'r') as f:
+        gs_pose = f.readlines()
+        for line in gs_pose:
+            line = line.strip()  # Remove the newline character at the end of the line
+            # Use regex to extract the index and the matrix elements
+            match = re.match(r"(\d+)\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]", line)
+            if match:
+                index = int(match.group(1))
+                matrix_elements = [list(map(float, match.group(i).split())) for i in range(2, 6)]
+                se3_matrices[index] = np.array(matrix_elements)
+
+                # pose_gs = PosePath3D(
+            #     positions_xyz=gs_pose[:,1:4],
+            #     orientations_quat_wxyz=gs_pose[:,4:])
+            # breakpoint()
+        pose_gs = PosePath3D(poses_se3=se3_matrices) 
         traj_gs = PoseTrajectory3D(poses_se3=pose_gs.poses_se3, timestamps=timestamps_mat)
     if os.path.exists(cf3dgs_traj_path):
         with open(cf3dgs_traj_path, 'r') as f:
@@ -272,9 +285,9 @@ if __name__ == '__main__':
             "monst3r_rpe_rot": np.format_float_positional(np.mean(rpe_rot_monst3r) if not None in rpe_rot_monst3r else None, precision=4, unique=False, fractional=False, trim='k'),
             "monst3r_rpe_trans": np.format_float_positional(np.mean(rpe_trans_monst3r) if not None in rpe_trans_monst3r else None, precision=4, unique=False, fractional=False, trim='k'),
 
-            "refined_ate": np.format_float_positional(np.mean(ate_overall_refined) if not None in ate_overall_refined else None, precision=4, unique=False, fractional=False, trim='k'),
-            "refined_rpe_rot": np.format_float_positional(np.mean(rpe_rot_refined) if not None in rpe_rot_refined else None, precision=4, unique=False, fractional=False, trim='k'),
-            "refined_rpe_trans": np.format_float_positional(np.mean(rpe_trans_refined) if not None in rpe_trans_refined else None, precision=4, unique=False, fractional=False, trim='k'),
+            # "refined_ate": np.format_float_positional(np.mean(ate_overall_refined) if not None in ate_overall_refined else None, precision=4, unique=False, fractional=False, trim='k'),
+            # "refined_rpe_rot": np.format_float_positional(np.mean(rpe_rot_refined) if not None in rpe_rot_refined else None, precision=4, unique=False, fractional=False, trim='k'),
+            # "refined_rpe_trans": np.format_float_positional(np.mean(rpe_trans_refined) if not None in rpe_trans_refined else None, precision=4, unique=False, fractional=False, trim='k'),
 
             "gs_ate": np.format_float_positional(np.mean(ate_overall_gs) if not None in ate_overall_gs else None, precision=4, unique=False, fractional=False, trim='k'),
             "gs_rpe_rot": np.format_float_positional(np.mean(rpe_rot_gs) if not None in rpe_rot_gs else None, precision=4, unique=False, fractional=False, trim='k'),

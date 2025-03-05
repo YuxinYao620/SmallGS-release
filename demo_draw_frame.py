@@ -242,6 +242,18 @@ def intermediate_pcds(pairs, output, imgs, args):
         pred1 = output['pred1']['pts3d'][mark_i]
         gs_use_pts[ind] = pred1
         gs_use_colors[ind] = output['view1']['img'][mark_i]
+    breakpoint()
+    # save the pcd
+    import open3d as o3d
+    for i in range(start_frame, end_frame):
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(gs_use_pts[i])
+        pcd.colors = o3d.utility.Vector3dVector(gs_use_colors[i])
+        dic = {}
+        dic['points'] = gs_use_pts[i]
+        dic['colors'] = gs_use_colors[i]
+        pickle.dump(dic, open(f'gs_use_pts_{i}.pkl', 'wb'))
+        o3d.io.write_point_cloud(f'gs_use_pts_{i}.ply', pcd)
     return gs_use_pts, gs_use_colors
 def get_reconstructed_scene(args, outdir, model, device, silent, image_size, filelist, schedule, niter, min_conf_thr,
                             as_pointcloud, mask_sky, clean_depth, transparent_cams, cam_size, show_cam, scenegraph_type, winsize, refid, 

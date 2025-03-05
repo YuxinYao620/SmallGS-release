@@ -89,7 +89,7 @@ def get_args_parser():
 
     parser.add_argument('--init_opa', type=float, default=0.1, help="Initial opacity of GS")
     parser.add_argument('--init_scale', type=float, default=1.0, help="Initial scale of GS")
-    parser.add_argument('--ssim_lambda', type=float, default=0.2, help="Weight for SSIM loss")
+    parser.add_argument('--ssim_lambda', type=float, default=0.0, help="Weight for SSIM loss")
     parser.add_argument('--near_plane', type=float, default=0.01, help="Near plane clipping distance")
     parser.add_argument('--far_plane', type=float, default=1e10, help="Far plane clipping distance")
     parser.add_argument('--prune_opa', type=float, default=0.005, help="GSs with opacity below this value will be pruned")
@@ -145,7 +145,7 @@ def get_args_parser():
 
     parser.add_argument('--canny_opt', action='store_true', help="Enable canny optimization")
     parser.add_argument('--camera_smoothness_loss', action='store_true', default="True",help="Enable camera smoothness loss")
-    parser.add_argument('--camera_smoothness_lambda', type=float, default=0.5, help="Weight for camera smoothness loss")
+    parser.add_argument('--camera_smoothness_lambda', type=float, default=1, help="Weight for camera smoothness loss")
 
     parser.add_argument('--local_rank',type=int, default=0)
     parser.add_argument('--world_rank',type=int, default=0)
@@ -174,6 +174,9 @@ def get_args_parser():
     parser.add_argument("--dino_dim", type=int, default=6, help="use feature loss")
     
     parser.add_argument("--doma_eval", action='store_true', default=False, help="evaluate doma")
+
+    parser.add_argument("--identity_prior", action='store_true', default=False, help="encourage camera pose to be identity")
+    parser.add_argument("--identity_prior_lambda", type=float, default=0.1, help="identity prior lambda")
     return parser
 
 def get_3D_model_from_scene(outdir, silent, scene, min_conf_thr=3, as_pointcloud=False, mask_sky=False,
@@ -408,6 +411,13 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
             gs_pose = runner.train()['global_cam_poses_est']
         # transform back
         gs_pose = torch.cat([torch.Tensor(pose).unsqueeze(0) for pose in gs_pose], dim=0)
+        tostr = lambda a: " ".join(map(str, a))
+        with Path(f"{outdir}/{seq_name}/gs_pose_matrix.txt").open("w") as f:
+            for i in range(len(gs_pose)):
+                ith_pose = gs_pose[i]
+                f.write(
+                    f"{i} {tostr(ith_pose.cpu().numpy())}\n"
+                )
         gs_pose_R = gs_pose[:,:3, :3]
         gs_pose_R = gs_pose_R.cpu().numpy()
         quat = Rotation.from_matrix(gs_pose_R)
@@ -527,6 +537,13 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
         # transform back
         refined_pose = torch.cat([torch.Tensor(pose).unsqueeze(0) for pose in refined_pose], dim=0)
         refined_pose = refined_pose @ torch.inverse(T)
+        tostr = lambda a: " ".join(map(str, a))
+        with Path(f"{outdir}/{seq_name}/refined_pose_matrix.txt").open("w") as f:
+            for i in range(len(refined_pose)):
+                ith_pose = refined_pose[i]
+                f.write(
+                    f"{i} {tostr(ith_pose.cpu().numpy())}\n"
+                )
 
         # turn to quaternion
         gs_pose_R = refined_pose[:,:3, :3]

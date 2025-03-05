@@ -49,6 +49,7 @@ sys.path.append('/home/yuxinyao/gsplats/submodule/DOMA')
 from submodule.DOMA.models.dpfs import MotionField
 
 import sys
+import random
 sys.path.append('/home/yuxinyao/gsplats')
 
 def get_scheduler(optimizer, policy, num_epochs_fix=None, num_epochs=None):
@@ -343,6 +344,8 @@ class Runner:
         os.makedirs(self.doma_render_dir, exist_ok=True)
         self.point_cloud_dir = f"{opt.workspace}/point_cloud"
         os.makedirs(self.point_cloud_dir, exist_ok=True)
+        self.debug_dir = f"{opt.workspace}/debug"
+        os.makedirs(self.debug_dir, exist_ok=True)
 
         # Tensorboard
         self.writer = SummaryWriter(log_dir=f"{opt.workspace}/tb")
@@ -791,7 +794,6 @@ class Runner:
                                 f"{i} {tostr(ith_pose[-3::].detach().cpu().numpy())} {tostr(ith_pose[[0,1,2,3]].detach().cpu().numpy())}\n"
                             )
 
-
             renders , alphas, info = self.rasterize_splats(
                 camtoworlds= camtoworlds_transformed if camera_opt else camtoworlds,
                 Ks=Ks,
@@ -868,12 +870,17 @@ class Runner:
 
             #     ft_loss = F.mse_loss(colors, dino_gt)
             #     loss += self.opt.ft_loss_lambda * ft_loss
+            if self.opt.identity_prior and camera_opt:
+                identity_loss = F.mse_loss(camtoworlds_transformed[:,:3,:3], torch.eye(3).unsqueeze(0).repeat(camtoworlds_transformed.shape[0],1,1).to(self.device))
+                loss += self.opt.identity_prior_lambda * identity_loss
 
             desc = f"loss={loss.item():.3f}| " f"sh degree={sh_degree_to_use}| "
                 
             pbar.set_description(desc)
             loss.backward()
-
+            if step % 100 == 0 and camera_opt:
+                with open(f"{self.debug_dir}/loss.txt", "a") as f:
+                    f.write(f"render cam opt :{step} {loss.item()}\n")
             if not camera_opt:
                 self.strategy.step_post_backward(
                     params=self.splats,

@@ -6,7 +6,7 @@ import time
 import json
 import glob
 
-def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None,gt_quats=None):
+def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None,gt_quats=None, transformed_quats_poses=None):
     from dust3r.utils.vo_eval import load_traj, eval_metrics, plot_trajectory, save_trajectory_tum_format, process_directory, calculate_averages
     from evo.core.trajectory import PoseTrajectory3D,PosePath3D
 
@@ -48,9 +48,21 @@ def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None,gt_quats=None):
             refined_pose = np.array([list(map(float,pose.split())) for pose in refined_pose])
             # turn tu wxyz
             refined_pose[:,4:] = refined_pose[:,[7,4,5,6]]
+        # from scipy.spatial.transform import Rotation as R
+        # original_r = R.from_quat(refined_pose[:,4:],scalar_first=True)
+        # original_r = original_r.as_matrix()
+        # # apply rotation 
+        # rotation_quat = R.from_euler('y', np.pi / 4).as_quat()
+        # rotation_matrix = R.from_quat(rotation_quat).as_matrix()
+
+        # rotated_rotation = np.einsum('ij,kjl->kil', rotation_matrix, original_r)
+        # rotated_quat = R.from_matrix(rotated_rotation).as_quat()
+        # refined_pose[:,4:] = rotated_quat[:,[3,0,1,2]]
+        
         pose_refined = PosePath3D(
             positions_xyz=refined_pose[:,1:4],
             orientations_quat_wxyz=refined_pose[:,4:])
+
         traj_refined = PoseTrajectory3D(poses_se3=pose_refined.poses_se3, timestamps=timestamps_mat)
     
     if os.path.exists(gs_traj_path):
@@ -86,6 +98,17 @@ def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None,gt_quats=None):
             positions_xyz=gt_quats[:,:3],
             orientations_quat_wxyz=gt_quats[:,3:],
             timestamps=np.array(timestamps_mat))
+    elif transformed_quats_poses is not None:
+        print("using transformed quats poses")
+        transformed_quats_poses = np.array(transformed_quats_poses)
+        pose_gt = PosePath3D(
+            positions_xyz=transformed_quats_poses[:,:3],
+            orientations_quat_wxyz=transformed_quats_poses[:,3:])
+        traj_gt = PoseTrajectory3D(poses_se3=pose_gt.poses_se3, timestamps=timestamps_mat)
+        gt_quats = np.array(transformed_quats_poses)
+        gt_transformed_quats_poses_path = f'{output_dir}/{seq}/cam_relative_traj.npy'
+        np.save(gt_transformed_quats_poses_path, gt_quats) 
+
     else:
         pose_gt = PosePath3D(poses_se3=gt_pose)
         traj_gt = PoseTrajectory3D(poses_se3=pose_gt.poses_se3, timestamps=timestamps_mat)
@@ -187,7 +210,9 @@ if __name__ == '__main__':
         seq_ind = save['selected_frames']
         gt_cam_poses = save['cam_poses']
         dataset_name = save['dataset']
-        # gt_cam_quats = save['cam_quats']
+        gt_cam_quats = save['cam_quats']
+        gt_transformed_quats_poses = save['transformed_quats_poses'] if 'transformed_quats_poses' in save else None
+
         # num_seq = len(os.listdir('/scratch/yy561/monst3r/batch_test_results_0.07_puregs/{}'.format(dataset_name)))
         # output_dir = '/scratch/yy561/monst3r/batch_test_results_0.07_puregs/{}'.format(dataset_name)
         # num_seq = len(os.listdir('/scratch/yy561/monst3r/tum_result_test'))-1
@@ -204,7 +229,6 @@ if __name__ == '__main__':
             print("Processing sequence: ",seq_dir)
             if not os.path.exists(seq_dir):
                 continue # skip if the sequence not exit yet 
-
             # check whether the sequence is already processed
             if not os.path.exists(os.path.join(output_dir, '{}_seq_{}_{}'.format(dataset_name[ind],seq_ind[ind][0], seq_ind[ind][-1]), "scene.glb")) and \
                 not os.path.exists(os.path.join(output_dir, '{}_seq_{}_{}'.format(dataset_name[ind],seq_ind[ind][0], seq_ind[ind][-1]), "gs_pose.txt")):
@@ -213,17 +237,15 @@ if __name__ == '__main__':
                 if not "static" in dataset_name[ind]:
                     # if not "xyz" in dataset_name[ind]:
                         continue
-                
+
 
             # evaluate the camera poses
-            try:
-                eval_monst3r_gs_poses('{}_seq_{}_{}'.format(dataset_name[ind],seq_ind[ind][0], seq_ind[ind][-1]), 
-                            output_dir, gt_pose=gt_cam_poses[ind])
-                            # , gt_quats = gt_cam_quats[ind])
-            except Exception as e:
-                eval_monst3r_gs_poses('{}_seq_{}_{}'.format(dataset_name[ind],seq_ind[ind][0], seq_ind[ind][-1]), 
-                            output_dir, gt_pose=gt_cam_poses[ind])
-                            # , gt_quats = gt_cam_quats[ind]) 
+            # try:
+            eval_monst3r_gs_poses('{}_seq_{}_{}'.format(dataset_name[ind],seq_ind[ind][0], seq_ind[ind][-1]), 
+                        output_dir, gt_pose=gt_cam_poses[ind], gt_quats =None, transformed_quats_poses=None)
+            # except Exception as e:
+            #     eval_monst3r_gs_poses('{}_seq_{}_{}'.format(dataset_name[ind],seq_ind[ind][0], seq_ind[ind][-1]), 
+            #                 output_dir, gt_pose=gt_cam_poses[ind], gt_quats = gt_cam_quats[ind])
 
             
             # collect the overall ATE
@@ -260,11 +282,11 @@ if __name__ == '__main__':
 
     # with open(os.path.join(output_dir, "overall_ate.json"), 'w') as f:
     if args.static:
-        file_name_overall_ate = "static_ate3.json"
+        file_name_overall_ate = "static_ate_debug_rot.json"
         if args.xyz:
             file_name_overall_ate = "static_xyz_ate.json"
     else:
-        file_name_overall_ate = "overall_ate.json"
+        file_name_overall_ate = "overall_ate_debug_rot.json"
     print('saving to ', os.path.join(output_dir, file_name_overall_ate))
     with open(os.path.join(output_dir, file_name_overall_ate), 'w') as f:
         json.dump({

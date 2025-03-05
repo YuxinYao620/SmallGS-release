@@ -21,7 +21,7 @@ if __name__ == "__main__":
 
     import pickle
     # with open("data/tum/tum_cam_poses_all_0.07.pkl", 'rb') as f:
-    with open("data/tum/tum_cam_poses_static_gt.pkl", 'rb') as f:
+    with open("data/tum/tum_cam_poses_static_gt_3.pkl", 'rb') as f:
         save = pickle.load(f)
     # if args.save_dir is not None:
     #     with open(os.path.join(args.save_dir), 'rb') as f:
@@ -29,7 +29,8 @@ if __name__ == "__main__":
     seq_ind = save['selected_frames']
     gt_cam_poses = save['cam_poses']
     dataset_name = save['dataset']
-    output_dir = "tum_walking_static/tum_rgb_refine_pose_copy/"
+    # output_dir = "tum_walking_static/tum_rgb_refine_pose_copy/"
+    output_dir = "/scratch/yy561/monst3r/tum_02ssim/tum_rgb_refine_pose/"
 
     for ind in range(len(seq_ind)):
             
@@ -44,9 +45,10 @@ if __name__ == "__main__":
         gt_pose_dir = output_dir
         cf3dgs_output_dir = output_dir
         droid_pose = output_dir
-        refined_dir = "tum_walking_static/tum_rgb_dino_refine_pose_16/" # change this to the path of the refined poses intermediate/dino
-        gs_dir = "tum_walking_static/tum_rgb_dino_refine_pose_16/" # change this to the path of the gs poses intermediate/dino
-
+        # refined_dir = "tum_walking_static/tum_rgb_dino_refine_pose_16/" # change this to the path of the refined poses intermediate/dino
+        # gs_dir = "tum_walking_static/tum_rgb_dino_refine_pose_16/" # change this to the path of the gs poses intermediate/dino
+        refined_dir = "tum_02ssim/tum_rgb_refine_pose_dino16/"
+        gs_dir = "tum_02ssim/tum_rgb_refine_pose_dino16/"
         # load the camera poses
         # traj_gt, traj_monster, traj_refined, traj_gs, traj_cf3dgs, traj_droid = eval_monst3r_gs_poses(seq_dir, output_dir)
 
@@ -129,20 +131,20 @@ if __name__ == "__main__":
         
 
         fig = plt.figure()
-        labels = ["Ground-truth", "Monst3r", "Refined", "GS", "CF3DGS", "Droid"]
+        labels = ["Ground-truth", "Monst3r", "Refined", "SmallGS", "CF3DGS", "Droid"]
         styles = [':', '--', '-.', '-', '-.', '--']
         colors = ['r', 'b', 'g', 'c', 'm', 'y']
 
-        colors = {'Ground-truth': 'r', 'Monst3r': 'b', 'Refined': 'g', 'GS': 'c', 'CF3DGS': 'm', 'Droid': 'y'}
-        styles = {'Ground-truth': ':', 'Monst3r': '--', 'Refined': '-.', 'GS': '-', 'CF3DGS': '-.', 'Droid': '--'}
+        colors = {'Ground-truth': 'r', 'Monst3r': '#0EA5E9', 'Refined': 'g', 'SmallGS': 'c', 'CF3DGS': 'm', 'Droid': 'y'}
+        styles = {'Ground-truth': ':', 'Monst3r': '--', 'Refined': '-.', 'SmallGS': '-', 'CF3DGS': '-.', 'Droid': '--'}
 
         traj_by_label = {
             "Ground-truth": traj_gt,
-            # "Monst3r": traj_monster,
+            "Monst3r": traj_monster,
             # "Refined": traj_refined,
-            "GS": traj_gs,
             # "CF3DGS": traj_cf3dgs,
             # "Droid": traj_droid,
+            "SmallGS": traj_gs,
         }
         plot_mode = plot.PlotMode.xyz
         # ax = plot.prepare_axis(fig, plot_mode, 111)
@@ -190,7 +192,7 @@ if __name__ == "__main__":
         ax.view_init(elev=10., azim=45)
         plt.tight_layout()
         # pose_vis_path = os.path.join(os.path.dirname(output_path), 'pose_vis.png')
-        output_path = os.path.join(output_dir, "paper_dino_gs", "{}.png".format(seq))
+        output_path = os.path.join(output_dir, "paper_monst3r_gs_final2", "{}.png".format(seq))
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         # output_path = os.path.join(output_dir, "pose_img_dino16", "{}.png".format(seq))
         fig.savefig(output_path)
