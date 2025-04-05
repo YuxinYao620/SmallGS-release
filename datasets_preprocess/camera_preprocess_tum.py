@@ -64,14 +64,13 @@ dirs = sorted(dirs)
 
 root_dir = "/scratch/yy561/monst3r/"
 
-
 # extract frames
 selected_frames = []
 selected_frames_path = []
 cam_poses = []
-save = {"selected_frames":[], "cam_poses":[], "image_paths":[], 'scene_name':[], 'dataset_path':[], "dataset":[]}
+save = {"selected_frames":[], "cam_poses":[], "image_paths":[], 'scene_name':[], 'dataset_path':[], "dataset":[], "cam_quats":[]}
 for dir in dirs:
-    if "walking_static" in dir:
+    if "static" not in dir:
         continue
     dataset_name = dir.split('/')[-2]
     sliding_window = 30
@@ -90,17 +89,28 @@ for dir in dirs:
     for a,b in matches:
         frames.append(dir + first_list[a][0])
         gt.append([b]+second_list[b])
+
+    gt_traj_func= lambda img_path, anno_path, seq: os.path.join(img_path, seq, 'groundtruth_90.txt'),
     
     # turn quaternions into rotation matrices
     cam_exts = []
+    cam_quats = []
     for i in range(len(gt)):
         # tx ty tz qx qy qz qw
         q = np.array([float(x) for x in gt[i][4:]])
+        # q = np.roll(q, 1)
+        q = np.array([q[3], q[0], q[1], q[2]])
+
         t = np.array([float(x) for x in gt[i][1:4]])
         cam_ext_i = np.eye(4)
-        cam_ext_i[:3, :3] = R.from_quat(q, scalar_first = False).as_matrix()
+        cam_ext_i[:3, :3] = R.from_quat(q, scalar_first = True).as_matrix()
         cam_ext_i[:3, 3] = t
         cam_exts.append(cam_ext_i)
+        # cam_quats.append(gt[i][[]])
+        cam_quats.append(np.array(np.concatenate([t, q])))
+
+        
+
     num_frames = len(gt)
     # select camera constrained videos
     while continue_flag:
@@ -108,6 +118,7 @@ for dir in dirs:
         selected_frames = []
         selected_frames_path = []
         cam_poses = []
+        cam_quats_pose = []
         indices = range(0, num_frames, 1)
         reset_ind = False
 
@@ -152,10 +163,12 @@ for dir in dirs:
                 if len(selected_frames) < 1:
                     selected_frames = [[i for i in range(index - sliding_window//2, max_ind)]]
                     cam_poses = [[cam_exts[i] for i in range(index - sliding_window//2, max_ind)]]
+                    cam_quats_pose = [[cam_quats[i] for i in range(index - sliding_window//2, max_ind)]]
                     selected_frames_path = [[frames[i].replace("../","") for i in range(index - sliding_window//2, max_ind)]]
                 else:
                     selected_frames.append([i for i in range(index - sliding_window//2, max_ind)]) 
                     cam_poses.append([cam_exts[i] for i in range(index - sliding_window//2, max_ind)])
+                    cam_quats_pose.append([cam_quats[i] for i in range(index - sliding_window//2, max_ind)])
                     selected_frames_path.append([frames[i].replace("../","") for i in range(index - sliding_window//2, max_ind)])
                 # index = max_ind
                 # remove indices form list 
@@ -185,6 +198,7 @@ for dir in dirs:
             save['selected_frames'] += selected_frames
             save['cam_poses'] += cam_poses
             save['image_paths'] += selected_frames_path
+            save['cam_quats'] += cam_quats_pose
 
             print(dir, "\n", "Save Number of frames: ", num_frames, "Sliding window: ", sliding_window, "sequence length: ", len(selected_frames))
             
@@ -222,5 +236,5 @@ print(dir, "\n", "Save Number of frames: ", num_frames, "Sliding window: ", slid
 import pickle
 print(len(save['selected_frames']))
 breakpoint()
-with open(f"/scratch/yy561/monst3r/data/tum/tum_cam_poses_all_0.07_rest_except_static_walking.pkl", "wb") as f:
+with open(f"/scratch/yy561/monst3r/data/tum/tum_cam_poses_static_gt_2.pkl", "wb") as f:
     pickle.dump(save, f)

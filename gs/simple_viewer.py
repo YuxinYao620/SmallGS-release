@@ -233,6 +233,7 @@ def main(local_rank: int, world_rank, world_size: int, args):
         # colors = []
         for ckpt_path in args.ckpt:
             ckpt = torch.load(ckpt_path, map_location=device)["splats"]
+            print("keys", ckpt.keys())
             means.append(ckpt["means"])
             quats.append(F.normalize(ckpt["quats"], p=2, dim=-1))
             scales.append(torch.exp(ckpt["scales"]))

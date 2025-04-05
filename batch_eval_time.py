@@ -10,7 +10,7 @@ def eval_time(seq, output_dir, gt_pose=None,gt_quats=None, transformed_quats_pos
     from dust3r.utils.vo_eval import load_traj, eval_metrics, plot_trajectory, save_trajectory_tum_format, process_directory, calculate_averages
     from evo.core.trajectory import PoseTrajectory3D,PosePath3D
 
-    gs_time_path = os.path.join(output_dir, seq, 'cf3dgs_time.txt')
+    gs_time_path = os.path.join(output_dir, seq, 'cf3dgs_time_sem.txt')
     try:
         with open(gs_time_path, "r") as file:
             lines = file.readlines()

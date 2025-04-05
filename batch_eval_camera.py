@@ -13,7 +13,7 @@ def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None,gt_quats=None):
     monst3r_traj_path  = f'{output_dir}/{seq}/pred_traj.txt'
     refined_traj_path = f'{output_dir}/{seq}/refined_pose.txt'
     gs_traj_path = f'{output_dir}/{seq}/gs_pose.txt'
-    cf3dgs_traj_path = f'{output_dir}/{seq}/cf3dgs.txt'
+    cf3dgs_traj_path = f'{output_dir}/{seq}/cf3dgs_sem.txt'
     droid_traj_path = f'{output_dir}/{seq}/droid_traj.npy'
     traj_monster = None
     traj_refined = None
@@ -128,7 +128,7 @@ def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None,gt_quats=None):
         "droid_rpe_trans": droid_rpe if os.path.exists(droid_traj_path) else None,
         "droid_rpe_rot": droid_rpe_rot if os.path.exists(droid_traj_path) else None
     }
-    json.dump(eval_results, open(f'{output_dir}/{seq}/eval_results_gs_monst3r.json', 'w'))
+    json.dump(eval_results, open(f'{output_dir}/{seq}/eval_results_gs_monst3r_cf3dgs_sem.json', 'w'))
 
     return traj_gt, traj_monster, traj_refined, traj_gs, traj_cf3dgs, traj_droid
 
@@ -228,7 +228,7 @@ if __name__ == '__main__':
             
             # collect the overall ATE
 
-            with open(os.path.join(output_dir, '{}_seq_{}_{}'.format(dataset_name[ind],seq_ind[ind][0], seq_ind[ind][-1]), "eval_results_gs_monst3r.json"), 'r') as f:
+            with open(os.path.join(output_dir, '{}_seq_{}_{}'.format(dataset_name[ind],seq_ind[ind][0], seq_ind[ind][-1]), "eval_results_gs_monst3r_cf3dgs_sem.json"), 'r') as f:
                 data = json.load(f)
                 ate_overall_monst3r.append(data['monst3r_ate'])
                 ate_overall_refined.append(data['refined_ate'])
@@ -260,11 +260,11 @@ if __name__ == '__main__':
 
     # with open(os.path.join(output_dir, "overall_ate.json"), 'w') as f:
     if args.static:
-        file_name_overall_ate = "static_ate3.json"
+        file_name_overall_ate = "static_ate3_cf3dgs_sem.json"
         if args.xyz:
-            file_name_overall_ate = "static_xyz_ate.json"
+            file_name_overall_ate = "static_xyz_ate_cf3dgs_sem.json"
     else:
-        file_name_overall_ate = "overall_ate.json"
+        file_name_overall_ate = "overall_ate_cf3dgs_sem.json"
     print('saving to ', os.path.join(output_dir, file_name_overall_ate))
     with open(os.path.join(output_dir, file_name_overall_ate), 'w') as f:
         json.dump({
@@ -280,9 +280,9 @@ if __name__ == '__main__':
             "gs_rpe_rot": np.format_float_positional(np.mean(rpe_rot_gs) if not None in rpe_rot_gs else None, precision=4, unique=False, fractional=False, trim='k'),
             "gs_rpe_trans": np.format_float_positional(np.mean(rpe_trans_gs) if not None in rpe_trans_gs else None, precision=4, unique=False, fractional=False, trim='k'),
         
-            # "cf3dgs_ate": np.format_float_positional(np.mean(ate_overall_cf3dgs) if not None in ate_overall_cf3dgs else None, precision=4, unique=False, fractional=False, trim='k'),
-            # "cf3dgs_rpe_rot": np.format_float_positional(np.mean(rpe_rot_cf3dgs) if not None in rpe_rot_cf3dgs else None, precision=4, unique=False, fractional=False, trim='k'),
-            # "cf3dgs_rpe_trans": np.format_float_positional(np.mean(rpe_trans_cf3dgs) if not None in rpe_trans_cf3dgs else None, precision=4, unique=False, fractional=False, trim='k'),
+            "cf3dgs_ate": np.format_float_positional(np.mean(ate_overall_cf3dgs) if not None in ate_overall_cf3dgs else None, precision=4, unique=False, fractional=False, trim='k'),
+            "cf3dgs_rpe_rot": np.format_float_positional(np.mean(rpe_rot_cf3dgs) if not None in rpe_rot_cf3dgs else None, precision=4, unique=False, fractional=False, trim='k'),
+            "cf3dgs_rpe_trans": np.format_float_positional(np.mean(rpe_trans_cf3dgs) if not None in rpe_trans_cf3dgs else None, precision=4, unique=False, fractional=False, trim='k'),
 
             # "droid_ate": np.format_float_positional(np.mean(ate_overall_droid) if not None in ate_overall_droid else None, precision=4, unique=False, fractional=False, trim='k'),
             # "droid_rpe_rot": np.format_float_positional(np.mean(rpe_rot_droid) if not None in rpe_rot_droid else None, precision=4, unique=False, fractional=False, trim='k'),

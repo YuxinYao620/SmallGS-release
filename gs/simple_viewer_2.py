@@ -155,9 +155,9 @@ def load_camera_pose(pose_path, device):
     
 
 
-    return pred_quats.to(device), gt_positions.to(device), pred_quats.to(device), gt_positions.to(device), mean_point
+    # return pred_quats.to(device), gt_positions.to(device), pred_quats.to(device), gt_positions.to(device), mean_point
     # return pred_quats.to(device), pred_positions.to(device), pred_quats.to(device), pred_positions.to(device), mean_point 
-    # return monst3r_quats.to(device), monst3r_positions.to(device), monst3r_quats.to(device), monst3r_positions.to(device), mean_point
+    return monst3r_quats.to(device), monst3r_positions.to(device), monst3r_quats.to(device), monst3r_positions.to(device), mean_point
 
 def main(local_rank: int, world_rank, world_size: int, args):
     torch.manual_seed(42)
@@ -288,6 +288,9 @@ def main(local_rank: int, world_rank, world_size: int, args):
         else:
             raise ValueError
 
+        # Set white background (255,255,255) to match what's shown in the viewer
+        backgrounds = torch.tensor([[255.0, 255.0, 255.0]]).to(device)
+
         render_colors, render_alphas, meta = rasterization_fn(
             means,  # [N, 3]
             quats,  # [N, 4]
@@ -302,8 +305,9 @@ def main(local_rank: int, world_rank, world_size: int, args):
             render_mode="RGB",
             # this is to speedup large-scale rendering by skipping far-away Gaussians.
             radius_clip=3,
-            backgrounds = torch.Tensor([255,255,255]).unsqueeze(0).to(device),
+            backgrounds=backgrounds / 255.0,  # Normalize to [0,1] range
         )
+        
         render_rgbs = render_colors[0, ..., 0:3].cpu().numpy()
         return render_rgbs
 
@@ -413,7 +417,9 @@ def main(local_rank: int, world_rank, world_size: int, args):
     def _(event: viser.GuiEvent) -> None:
         client = event.client
         assert client is not None
-
+        # Create a variable to track the currently displayed red square
+        current_square = None
+        
         # view the scene from 20 different camera poses
         for i in range(len(pred_quats)):
             frame = pred_frame_list[i]
@@ -432,10 +438,57 @@ def main(local_rank: int, world_rank, world_size: int, args):
                 client.camera.position = T_world_set.translation()
                 # client.flush()  # Optional!
             
-            time.sleep(1.0)
-
-            # Mouse interactions should orbit around the frame origin.
-            client.camera.look_at = frame.position
+            # # Remove previous square if it exists
+            # if current_square is not None:
+            #     current_square.remove()
+            #     current_square = None
+            
+            # # Create a new red square in the view as a frame change indicator
+            # # Position the square in front of the camera
+            # camera_forward = T_world_set.rotation().as_matrix()[:, 2]
+            # square_position = T_world_set.translation() + camera_forward * 0.5
+            
+            # # Create a red indicator using point_cloud instead of sphere
+            # current_square = client.scene.add_point_cloud(
+            #     name=f"frame_indicator_{i}",
+            #     points=np.array([square_position]),
+            #     colors=np.array([[255, 0, 0]]),
+            #     point_size=0.1
+            # )
+            
+            # Wait briefly to let the user see the indicator (short flash)
+            # time.sleep(0.3)
+            
+            # # Remove the indicator immediately after the short flash
+            # if current_square is not None:
+            #     current_square.remove()
+            #     current_square = None
+            
+            # Render and save the current view
+            # Create a proper camera state object from the client camera
+            camera_state = nerfview.CameraState(
+                c2w=tf.SE3.from_rotation_and_translation(
+                    tf.SO3(client.camera.wxyz),
+                    client.camera.position
+                ).as_matrix(),
+                fov=client.camera.fov,
+                aspect=client.camera.aspect
+            )
+            
+            # Use the proper camera state for rendering
+            image = viewer_render_fn(camera_state, img_wh=(512, 384))
+            # save_dir = os.path.join(args.pose_dir, "frame_captures_gs")
+            save_dir = "/scratch/yy561/monst3r/paper_example/tum_02ssim/paper_video/frame_captures_monst3r_510_539"
+            os.makedirs(save_dir, exist_ok=True)
+            imageio.imwrite(f"{save_dir}/frame_{i:03d}.png", (image * 255).astype(np.uint8))
+            print(f"Saved frame {i} image to {save_dir}/frame_{i:03d}.png")
+                
+            # Continue waiting to complete the desired frame rate (total pause per frame)
+            time.sleep(0.7)
+        
+        # Remove the last square after the loop finishes
+        if current_square is not None:
+            current_square.remove()
 
     button2 = server.gui.add_button("View all droid camera pose")
     @button2.on_click

@@ -65,7 +65,7 @@ def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None,gt_quats=None):
     monst3r_traj_path  = f'{output_dir}/{seq}/pred_traj.txt'
     refined_traj_path = f'{output_dir}/{seq}/refined_pose.txt'
     gs_traj_path = f'{output_dir}/{seq}/gs_pose.txt'
-    cf3dgs_traj_path = f'{output_dir}/{seq}/cf3dgs.txt'
+    cf3dgs_traj_path = f'{output_dir}/{seq}/cf3dgs_sem.txt'
     droid_traj_path = f'{output_dir}/{seq}/droid_traj.npy'
     traj_monster = None
     traj_refined = None
@@ -193,7 +193,7 @@ def eval_monst3r_gs_poses(seq, output_dir, gt_pose=None,gt_quats=None):
     #     "droid_rpe_trans": droid_rpe if os.path.exists(droid_traj_path) else None,
     #     "droid_rpe_rot": droid_rpe_rot if os.path.exists(droid_traj_path) else None
     # }
-    json.dump(eval_results, open(f'{output_dir}/{seq}/eval_velocity.json', 'w'))
+    json.dump(eval_results, open(f'{output_dir}/{seq}/eval_velocity_cf3dgs_sem.json', 'w'))
 
     # return traj_gt, traj_monster, traj_refined, traj_gs, traj_cf3dgs, traj_droid
     return monst3r_velocity_diff, refined_velocity_diff, gs_velocity_diff
@@ -305,7 +305,7 @@ if __name__ == '__main__':
             #     ate_overall_droid.append(data['droid_ate'])
             #     rpe_rot_droid.append(data['droid_rpe_rot'])
             #     rpe_trans_droid.append(data['droid_rpe_trans'])
-            with open(os.path.join(output_dir, '{}_seq_{}_{}'.format(dataset_name[ind],seq_ind[ind][0], seq_ind[ind][-1]), "eval_velocity.json"), 'r') as f:
+            with open(os.path.join(output_dir, '{}_seq_{}_{}'.format(dataset_name[ind],seq_ind[ind][0], seq_ind[ind][-1]), "eval_velocity_cf3dgs_sem.json"), 'r') as f:
                 data = json.load(f)
                 monst3r_velocity_diff_overall.append(data['monst3r_velocity_diff'])
                 refine_velocity_diff_overall.append(data['refined_velocity_diff'])
@@ -339,11 +339,11 @@ if __name__ == '__main__':
 
     # with open(os.path.join(output_dir, "overall_ate.json"), 'w') as f:
     if args.static:
-        file_name_overall_ate = "static_velocity.json"
+        file_name_overall_ate = "static_velocity_cf3dgs_sem.json"
         if args.xyz:
-            file_name_overall_ate = "static_xyz_ate.json"
+            file_name_overall_ate = "static_xyz_velocity_cf3dgs_sem.json"
     else:
-        file_name_overall_ate = "overall_velocity.json"
+        file_name_overall_ate = "overall_velocity_cf3dgs_sem.json"
     print('saving to ', os.path.join(output_dir, file_name_overall_ate))
     with open(os.path.join(output_dir, file_name_overall_ate), 'w') as f:
         json.dump({
