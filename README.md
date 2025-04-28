@@ -12,7 +12,7 @@ This repository is the official implementation of the paper:
 [*Zhening Huang*](https://zheninghuang.github.io/)
 Arxiv, 2025. [**[Project Page]**](https://yuxinyao620.github.io/SmallGS/) [**[Paper]**](https://arxiv.org/pdf/2504.17810)
 
-[![Watch the video](assets/fig1_teaser.png)](https://monst3r-project.github.io/files/teaser_vid_v2_lowres.mp4)
+![Teaser Image](assets/teaser.jpg)
 
 <!-- ## Getting Started
 
