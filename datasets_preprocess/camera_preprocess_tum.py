@@ -62,8 +62,6 @@ def associate(first_list, second_list, offset, max_difference):
 dirs = glob.glob("../data/tum/*/")
 dirs = sorted(dirs)
 
-root_dir = "/scratch/yy561/monst3r/"
-
 # extract frames
 selected_frames = []
 selected_frames_path = []
@@ -153,7 +151,6 @@ for dir in dirs:
                     if theta > 0.07:
                         accept_flag = False
                     # check the translation difference, reject large baseline
-                    # breakpoint()
                     t_current = cam_exts[i][:3, 3]
                     t_middle = cam_middle[:3, 3]
                     if np.linalg.norm(t_current - t_middle) > 0.1:
@@ -170,29 +167,12 @@ for dir in dirs:
                     cam_poses.append([cam_exts[i] for i in range(index - sliding_window//2, max_ind)])
                     cam_quats_pose.append([cam_quats[i] for i in range(index - sliding_window//2, max_ind)])
                     selected_frames_path.append([frames[i].replace("../","") for i in range(index - sliding_window//2, max_ind)])
-                # index = max_ind
                 # remove indices form list 
                 indices = [i for i in indices if i not in range(index - sliding_window//2, max_ind)]
-                # print("Number of frames: ", num_frames, "Sliding window: ", sliding_window, "Number of frames left: ", len(indices))
             else:
                 accept_flag = True
-                # sliding_window -= 5
-                # if sliding_window < 15:
-                #     continue_flag = False
-                #     break
         if len(selected_frames) > 0:
             continue_flag = False
-            # save = {}
-            # save['selected_frames'] = selected_frames
-            # save['cam_poses'] = cam_poses
-            # save['dataset'] = dataset_name
-            # save['dataset_path'] = dir
-            # save['image_paths'] = selected_frames_path
-            # save['dataset_type'] = 'tum'
-            # print(dir, "\n", "Save Number of frames: ", num_frames, "Sliding window: ", sliding_window)
-            # import pickle
-            # with open(f"/scratch/yy561/monst3r/data/tum/tum_cam_poses_{dataset_name}_{sliding_window}_theta0.07.pkl", "wb") as f:
-            #     pickle.dump(save, f)
             save['dataset'] += [dataset_name for i in range(len(selected_frames))]
             save['dataset_path'] += [dir for i in range(len(selected_frames))]
             save['selected_frames'] += selected_frames
@@ -206,35 +186,11 @@ for dir in dirs:
         sliding_window -= 5
         if sliding_window < 10:
             continue_flag = False
-            import pickle
-            # if len(selected_frames) > 0:
-            # #     save = {}
-            # #     save['selected_frames'] = selected_frames
-            # #     save['cam_poses'] = cam_poses
-            # #     save['dataset'] = dataset_name
-            # #     save['dataset_type'] = 'tum'
-            # #     save['dataset_path'] = dir
-            # #     save['image_paths'] = selected_frames_path
-            #     # save['dataset'] = dataset_name
-            #     save['selected_frames'] += selected_frames
-            #     save['cam_poses'] += cam_poses
-            #     save['image_paths'] += selected_frames_path
-
-
-            #     with open(f"tum_cam_poses_{dataset_name}_max.pkl", "wb") as f:
-            #             pickle.dump(save, f)
             break
 
-# save = {}
-# save['selected_frames'] = selected_frames
-# save['cam_poses'] = cam_poses
-# save['dataset'] = dataset_name
-# save['dataset_path'] = dir
-# save['image_paths'] = selected_frames_path
-# save['dataset_type'] = 'tum'
 print(dir, "\n", "Save Number of frames: ", num_frames, "Sliding window: ", sliding_window)
 import pickle
 print(len(save['selected_frames']))
 breakpoint()
-with open(f"/scratch/yy561/monst3r/data/tum/tum_cam_poses_static_gt_2.pkl", "wb") as f:
+with open(f"../data/tum/tum_cam_poses_static_gt_test.pkl", "wb") as f:
     pickle.dump(save, f)

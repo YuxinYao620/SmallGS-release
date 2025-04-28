@@ -1,31 +1,20 @@
-# MonST3R: A Simple Approach for Estimating Geometry in the Presence of Motion
+# SmallGS: Gaussian Splatting-based Camera Pose Estimation for Small-Baseline Videos
 
-**MonST3R**  processes a dynamic video to produce a time-varying dynamic point cloud, along with per-frame camera poses and intrinsics, in a predominantly **feed-forward** manner. This representation then enables the efficient computation of downstream tasks, such as video depth estimation and dynamic/static scene segmentation.
+**SmallGS**  processes a dynamic video with small baseline to obtain the camera poses. It leverages Gaussian splatting to optimize camera poses while mitigating dynamic object interference via predicted semantic masks. It **does not rely on 3D alignments or triangulation**, alleviating the instability in camera pose estimation caused by limited parallax and weak geometric
+constraints.
+
 
 This repository is the official implementation of the paper:
 
-[**MonST3R: A Simple Approach for Estimating Geometry in the Presence of Motion**](https://monst3r-project.github.io/files/monst3r_paper.pdf)
-[*Junyi Zhang*](https://junyi42.github.io/),
-[*Charles Herrmann+*](https://scholar.google.com/citations?user=LQvi5XAAAAAJ),
-[*Junhwa Hur*](https://hurjunhwa.github.io/),
-[*Varun Jampani*](https://varunjampani.github.io/),
-[*Trevor Darrell*](https://people.eecs.berkeley.edu/~trevor/),
-[*Forrester Cole*](https://scholar.google.com/citations?user=xZRRr-IAAAAJ&hl),
-[*Deqing Sun**](https://deqings.github.io/),
-[*Ming-Hsuan Yang**](https://faculty.ucmerced.edu/mhyang/)
-Arxiv, 2024. [**[Project Page]**](https://monst3r-project.github.io/) [**[Paper]**](https://monst3r-project.github.io/files/monst3r_paper.pdf) [**[Interactive Results🔥]**](https://monst3r-project.github.io/page1.html) 
+[**SmallGS: Gaussian Splatting-based Camera Pose Estimation for Small-Baseline Videos**](https://arxiv.org/pdf/2504.17810)
+[*Yuxin Yao*](https://yuxinyao620.github.io/)
+[*Yan Zhang*](https://yz-cnsdqz.github.io/)
+[*Zhening Huang*](https://zheninghuang.github.io/)
+Arxiv, 2025. [**[Project Page]**](https://yuxinyao620.github.io/SmallGS/) [**[Paper]**](https://arxiv.org/pdf/2504.17810)
 
 [![Watch the video](assets/fig1_teaser.png)](https://monst3r-project.github.io/files/teaser_vid_v2_lowres.mp4)
 
-## TODO
-- [x] Release model weights on [Google Drive](https://drive.google.com/file/d/1Z1jO_JmfZj0z3bgMvCwqfUhyZ1bIbc9E/view?usp=sharing) and [Hugging Face](https://huggingface.co/Junyi42/MonST3R_PO-TA-S-W_ViTLarge_BaseDecoder_512_dpt) (10/07)
-- [x] Release inference code for global optimization (10/18)
-- [x] Release 4D visualization code (10/18)
-- [x] Release training code & dataset preparation (10/19)
-- [x] Release evaluation code (10/20)
-- [ ] Gradio Demo
-
-## Getting Started
+<!-- ## Getting Started
 
 ### Installation
 
@@ -159,4 +148,4 @@ If you find our work useful, please cite:
 ```
 
 ## Acknowledgements
-Our code is based on [DUSt3R](https://github.com/naver/dust3r) and [CasualSAM](https://github.com/ztzhang/casualSAM), our camera pose estimation evaluation script is based on [LEAP-VO](https://github.com/chiaki530/leapvo), and our visualization code is based on [Viser](https://github.com/nerfstudio-project/viser). We thank the authors for their excellent work!
+Our code is based on [DUSt3R](https://github.com/naver/dust3r) and [CasualSAM](https://github.com/ztzhang/casualSAM), our camera pose estimation evaluation script is based on [LEAP-VO](https://github.com/chiaki530/leapvo), and our visualization code is based on [Viser](https://github.com/nerfstudio-project/viser). We thank the authors for their excellent work! -->

@@ -44,13 +44,9 @@ from plyfile import PlyData, PlyElement
 
 
 import sys
-sys.path.append('/home/yuxinyao/gsplat/')
-sys.path.append('/home/yuxinyao/gsplats/submodule/DOMA')
-from submodule.DOMA.models.dpfs import MotionField
 
 import sys
 import random
-sys.path.append('/home/yuxinyao/gsplats')
 
 def get_scheduler(optimizer, policy, num_epochs_fix=None, num_epochs=None):
     if policy == 'lambda':
@@ -340,8 +336,6 @@ class Runner:
         os.makedirs(self.depth_gt_dir, exist_ok=True)
         self.sem_dir = f"{opt.workspace}/sem"
         os.makedirs(self.sem_dir, exist_ok=True)
-        self.doma_render_dir = f"{opt.workspace}/doma_render_test"
-        os.makedirs(self.doma_render_dir, exist_ok=True)
         self.point_cloud_dir = f"{opt.workspace}/point_cloud"
         os.makedirs(self.point_cloud_dir, exist_ok=True)
         self.debug_dir = f"{opt.workspace}/debug"
@@ -421,7 +415,7 @@ class Runner:
             
 
     def parameters(self):
-        return list(self.model.splats.parameters()) + list(self.model.doma.parameters())
+        return list(self.model.splats.parameters())
 
     def rasterize_splats(
         self,
@@ -429,16 +423,13 @@ class Runner:
         Ks: Tensor,
         width: int,
         height: int,
-        doma_mean = None,
-        doma_scale = None,
         **kwargs,
     ) -> Tuple[Tensor, Tensor, Dict]:
         
-        means = doma_mean if doma_mean is not None else self.splats["means"]
-        # quats = F.normalize(self.splats["quats"], dim=-1)  # [N, 4]
+        means = self.splats["means"]
         # rasterization does normalization internally
         quats = self.splats["quats"]  # [N, 4]
-        scales = torch.exp(self.splats["scales"]) if doma_scale is None else doma_scale # [N, 3]
+        scales = torch.exp(self.splats["scales"])
         opacities = torch.sigmoid(self.splats["opacities"])  # [N,]
 
         image_ids = kwargs.pop("image_ids", None)
@@ -476,132 +467,6 @@ class Runner:
         )
         return render_colors, render_alphas, info
     
-    def rasterize_splats_sf(
-        self,
-        camtoworlds,
-        Ks: Tensor,
-        width: int,
-        height: int,
-        means: Tensor,
-        quats: Tensor,
-        scales: Tensor,
-        opacities: Tensor,
-        colors: Tensor,
-        
-        **kwargs,
-    ) -> Tuple[Tensor, Tensor, Dict]:
-        
-        means = means
-        # quats = F.normalize(self.splats["quats"], dim=-1)  # [N, 4]
-        # rasterization does normalization internally
-        quats = self.splats["quats"]  # [N, 4]
-        scales = torch.exp(scales)
-        opacities = torch.sigmoid(opacities)  # [N,]
-
-        image_ids = kwargs.pop("image_ids", None)
-        # if self.opt.app_opt:
-        #     colors = self.app_module(
-        #         features=self.splats["features"],
-        #         embed_ids=image_ids,
-        #         dirs=means[None, :, :] - camtoworlds[:, None, :3, 3],
-        #         sh_degree=kwargs.pop("sh_degree", self.opt.sh_degree),
-        #     )
-        #     colors = colors + self.splats["colors"]
-        #     colors = torch.sigmoid(colors)
-        # else:
-        #     colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
-
-        colors = colors
-        rasterize_mode = "antialiased" if self.opt.antialiased else "classic"
-        render_colors, render_alphas, info = rasterization(
-            means=means,
-            quats=quats,
-            scales=scales,
-            opacities=opacities,
-            colors=colors,
-            viewmats=torch.linalg.inv(camtoworlds),  # [C, 4, 4]
-            Ks=Ks,  # [C, 3, 3]
-            width=width,
-            height=height,
-            packed=self.opt.packed,
-            absgrad=self.opt.absgrad,
-            sparse_grad=self.opt.sparse_grad,
-            rasterize_mode=rasterize_mode,
-            distributed=self.world_size > 1,
-            # # # backgrounds = torch.tensor(self.opt.background_color,device=self.device),
-            **kwargs,
-        )
-        return render_colors, render_alphas, info
-    
-
-    def rasterize_splats_sem(
-        self,
-        camtoworlds,
-        Ks: Tensor,
-        width: int,
-        height: int,
-        doma_mean = None,
-        doma_scale = None,
-        **kwargs,
-    ) -> Tuple[Tensor, Tensor, Dict]:
-        
-        # means = doma_mean if doma_mean is not None else self.splats["means"]
-        means = self.splats["means"]
-        quats = self.splats["quats"]  # [N, 4]
-        scales = torch.exp(self.splats["scales"]) if doma_scale is None else doma_scale # [N, 3]
-        opacities = torch.sigmoid(self.splats["opacities"])  # [N,]
-        # select only the semantic label ==1 
-
-
-        image_ids = kwargs.pop("image_ids", None)
-        if self.opt.app_opt:
-            colors = self.app_module(
-                features=self.splats["features"],
-                embed_ids=image_ids,
-                dirs=means[None, :, :] - camtoworlds[:, None, :3, 3],
-                sh_degree=kwargs.pop("sh_degree", self.opt.sh_degree),
-            )
-            colors = colors + self.splats["colors"]
-            colors = torch.sigmoid(colors)
-        else:
-            colors = torch.cat([self.splats["sh0"], self.splats["shN"]], 1)  # [N, K, 3]
-        
-        labels = torch.round(self.splats["labels"]).int()
-        temp_mean = torch.zeros_like(means)
-        if self.opt.doma:
-            temp_mean[labels == 0] += doma_mean 
-        else:
-            pass
-        # means[labels == 0] = doma_mean
-        # means = torch.where(labels == 0, doma_mean, means)
-        # means[labels == 0] *= 1e-6
-        means = torch.where(labels.unsqueeze(-1) == 0, temp_mean, means)
-
-        # means = means[labels == 0]
-        # quats = quats[labels == 0]
-        # scales = scales[labels == 0]
-        # opacities = opacities[labels == 0]
-        # colors = colors[labels == 0]
-
-        rasterize_mode = "antialiased" if self.opt.antialiased else "classic"
-        render_colors, render_alphas, info = rasterization(
-            means=means,
-            quats=quats,
-            scales=scales,
-            opacities=opacities,
-            colors=colors,
-            viewmats=torch.linalg.inv(camtoworlds),  # [C, 4, 4]
-            Ks=Ks,  # [C, 3, 3]
-            width=width,
-            height=height,
-            packed=self.opt.packed,
-            absgrad=self.opt.absgrad,
-            sparse_grad=self.opt.sparse_grad,
-            rasterize_mode=rasterize_mode,
-            distributed=self.world_size > 1,
-            **kwargs,
-        )
-        return render_colors, render_alphas, info
     
     def get_expon_lr_func(self, lr_init, lr_final, lr_delay_steps=0, lr_delay_mult=1.0, max_steps=1000000):
         """
@@ -653,10 +518,10 @@ class Runner:
 
     # https://github.com/nerfstudio-project/gsplat/issues/234
     @torch.no_grad()
-    def save_ply(self, path, doma_mean = None, color = None):
+    def save_ply(self, path):
         os.makedirs(os.path.dirname(path), exist_ok=True)
 
-        xyz = self.splats["means"].detach().cpu().numpy() if doma_mean is None else doma_mean.detach().cpu().numpy()
+        xyz = self.splats["means"].detach().cpu().numpy()
         normals = np.zeros_like(xyz)
         f_dc = self.splats["sh0"].detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
         f_rest = self.splats["shN"].detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
@@ -669,55 +534,9 @@ class Runner:
 
         elements = np.empty(xyz.shape[0], dtype=dtype_full)
         attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation), axis=1)
-        # breakpoint()
-        # if color is not None:
-        #     color_vex = torch.logit(color).squeeze(1).detach().cpu().numpy()
-        #     attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation, color_vex), axis=1)
         elements[:] = list(map(tuple, attributes))
         el = PlyElement.describe(elements, 'vertex')
         PlyData([el]).write(path)
-    # @torch.no_grad()
-    # def save_ply(self, path, doma_mean=None, color=None):
-    #     os.makedirs(os.path.dirname(path), exist_ok=True)
-
-    #     xyz = self.splats["means"].detach().cpu().numpy() if doma_mean is None else doma_mean.detach().cpu().numpy()
-    #     normals = np.zeros_like(xyz)
-    #     f_dc = self.splats["sh0"].detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
-    #     f_rest = self.splats["shN"].detach().transpose(1, 2).flatten(start_dim=1).contiguous().cpu().numpy()
-    #     opacities = self.splats["opacities"].detach().unsqueeze(-1).cpu().numpy()
-    #     scale = self.splats["scales"].detach().cpu().numpy()
-    #     rotation = self.splats["quats"].detach().cpu().numpy()
-
-    #     # Base attributes without color
-    #     attributes = np.concatenate((xyz, normals, f_dc, f_rest, opacities, scale, rotation), axis=1)
-
-    #     # Define dtype fields dynamically
-    #     dtype_full = [
-    #         ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
-    #         ('nx', 'f4'), ('ny', 'f4'), ('nz', 'f4'),
-    #         ('f_dc_0', 'f4'), ('f_dc_1', 'f4'), ('f_dc_2', 'f4'),
-    #         ('f_rest_0', 'f4'), ('f_rest_1', 'f4'), ('f_rest_2', 'f4'),
-    #         ('opacity', 'f4'), ('scale_x', 'f4'), ('scale_y', 'f4'), ('scale_z', 'f4'),
-    #         ('quat_w', 'f4'), ('quat_x', 'f4'), ('quat_y', 'f4'), ('quat_z', 'f4')
-    #     ]
-
-    #     if color is not None:
-    #         # Convert color to range [0, 255] and ensure it's in uint8 format
-    #         color = torch.sigmoid(color) if torch.min(color) < 0 or torch.max(color) > 1 else color
-    #         color_vex = (color * 255).squeeze(1).detach().cpu().numpy().astype(np.uint8)
-
-    #         # Add color fields to dtype and attributes
-    #         dtype_full.extend([('red', 'u1'), ('green', 'u1'), ('blue', 'u1')])
-    #         attributes = np.concatenate((attributes, color_vex), axis=1)
-
-    #     # Ensure attribute count matches dtype count
-    #     assert attributes.shape[1] == len(dtype_full), f"Mismatch: {attributes.shape[1]} columns vs {len(dtype_full)} dtype fields"
-
-    #     # Create structured array and write to PLY
-    #     elements = np.empty(attributes.shape[0], dtype=dtype_full)
-    #     elements[:] = list(map(tuple, attributes))
-    #     el = PlyElement.describe(elements, 'vertex')
-    #     PlyData([el]).write(path)
 
     
     def calculate_speed_smoothness(self,camera_positions):
@@ -729,16 +548,6 @@ class Runner:
         return speed_smoothness_loss
     
     def monst3r_camera_smoothness(self,camera_pose):
-        # camera_smoothness_loss = 0.0
-        # for i in range(1, len(camera_pose) - 1):
-        #     #punish large rotation
-        #     prev_rot = camera_pose[i - 1][:3,:3]
-        #     next_rot = camera_pose[i][:3,:3]
-        #     rot_diff = torch.matmul(prev_rot.t(), next_rot) - torch.eye(3).to(self.device)
-
-        #     #punish large translation
-        #     t_diff = torch.matmul(camera_pose[i - 1][:3,:3].t(), (camera_pose[i][:3,3] - camera_pose[i - 1][:3,3]).unsqueeze(0))
-        #     L_smooth = torch.F
         pose_loss = 0.0
         for i in range(1, len(camera_pose) - 1):
             RT1 = camera_pose[i - 1]
@@ -812,7 +621,6 @@ class Runner:
                     self.store_render_image(temp_renders, f'{image_ids[0]}_render_{step}')
                 else:
                     self.store_render_image(renders, f'{image_ids[0]}_render_{step}')
-                # self.store_render_image(renders, f'doma_{step}')
 
             if renders.shape[-1] == 4:
                 colors, depths_0 = renders[..., 0:3], renders[..., 3::]
@@ -852,9 +660,6 @@ class Runner:
                 )
 
             loss = l1loss * (1.0 - self.opt.ssim_lambda) + ssimloss * self.opt.ssim_lambda
-            # if opt.depth_loss:
-                # depthloss = F.l1_loss(depths_0.squeeze(-1), depthmap_gt)
-                # loss += depthloss
 
             if self.opt.camera_smoothness_loss and camera_opt:
                 if self.opt.monst3r_camera:
@@ -864,12 +669,6 @@ class Runner:
                 
                 loss += (1- step/max_steps_local)*self.opt.camera_smoothness_lambda * smoothness_loss
 
-            # if dino is not None:
-            #     # dino_emb = self.trainset.get_dino_feature_map(colors) # the input require the color to be in 0,255, image shape H,W,3
-            #     dino_gt = dino.to(self.device)
-
-            #     ft_loss = F.mse_loss(colors, dino_gt)
-            #     loss += self.opt.ft_loss_lambda * ft_loss
             if self.opt.identity_prior and camera_opt:
                 identity_loss = F.mse_loss(camtoworlds_transformed[:,:3,:3], torch.eye(3).unsqueeze(0).repeat(camtoworlds_transformed.shape[0],1,1).to(self.device))
                 loss += self.opt.identity_prior_lambda * identity_loss
@@ -956,19 +755,6 @@ class Runner:
                 f"{self.intermediate_result}/{path}.png",
                 (canvas* 255).astype(np.uint8),
             )
-
-    def init_doma(self,seq_len, device,max_steps):
-        model_opt = get_model_config(self.opt.motion_model_name, 
-            self.opt.elastic_loss_weight,
-            self.opt.homo_loss_weight,
-            seq_len, max_steps)
-        motion_model_opt = model_opt['motion_model_opt']
-        doma = MotionField(model_opt).to(device)
-        doma_optimizer = torch.optim.Adam(doma.model.parameters(), lr=motion_model_opt['lr'])
-        doma_scheduler = get_scheduler(doma_optimizer, policy='lambda',
-                    num_epochs_fix=1,
-                    num_epochs=max_steps)
-        return doma, doma_optimizer, doma_scheduler
 
     def train(self, monst3r_pointmap = None, monst3r_pointcolor = None):
         opt = self.opt
@@ -1120,7 +906,6 @@ class Runner:
                 for ind, pixel in enumerate(pixels):
 
                     # save semantic mask
- 
                     if opt.semantics_opt:
                         img_mask = semantics_masks[ind].long()
                         pixels[ind] = pixel*img_mask
@@ -1129,8 +914,6 @@ class Runner:
                         save_pixel = pixel.cpu().numpy()*255
                         canvas = np.concatenate([save_pixel,(img_mask.repeat(1,1,3).cpu().numpy().astype(np.uint8)*255)],axis=1)
                         mask.save(f"{self.sem_dir}/{image_ids[ind]}.png")
-                        # Image.fromarray(canvas.astype(np.uint8)).save(f"{self.sem_dir}/{image_ids[ind]}_rgb.png")
-                    # breakpoint()
                     depth_gt_save = Image.fromarray((depthmap_gt[ind].cpu().numpy()*255).astype(np.uint8))
                     depth_gt_save.save(f"{self.depth_gt_dir}/{image_ids[ind]}.png")
             height, width = pixels.shape[1:3]
@@ -1156,7 +939,6 @@ class Runner:
                                                                 schedulers,camera_schedulers,camera_opt = True,depthmap_gt=depthmap_gt[1:],
                                                                 masks=None, dino = dino_gt[1:] if opt.dino else None)
 
-                print('camera optimization result')
                 # current camera pose with optimization
                 est_cam_pose = self.pose_adjust(camtoworlds[1:], image_ids[1:])
                 # full estimated camera pose
@@ -1171,11 +953,9 @@ class Runner:
                 global_cam_poses_est += [ pose.cpu().numpy() for pose in transfomed_pose ]
                 global_cam_poses_gt += [ pose.cpu().numpy() for pose in camtoworlds_gt[1:]]
             else:
-                breakpoint()
                 est_cam_pose = camtoworlds
                 global_cam_poses_est += [camtoworlds.cpu().detach().numpy()]
                 global_cam_poses_gt += [camtoworlds_gt.cpu().detach().numpy()]
-            # breakpoint()
             est_cam_pose = torch.stack([data_block[0]['camtoworld'].to(device)]+[cam_pose.to(device) for cam_pose in est_cam_pose]).to(device)
 
             self.eval_all(current_frame, data_block, est_cam_pose)
@@ -1196,11 +976,6 @@ class Runner:
             torch.save(
                 data, f"{self.ckpt_dir}/ckpt_{current_frame}_rank{self.world_rank}.pt"
             )
-
-        if opt.eval_overall_gs:
-            self.train_gs_doma(opt.sh_degree, global_cam_poses_est)
-        print("pose_ckpt", opt.pose_ckpt)
-
 
         if block_end >= end_frame or not os.path.exists(opt.pose_ckpt):
         # if False:
@@ -1241,769 +1016,9 @@ class Runner:
             torch.save(
                 global_camera_poses, f"{self.traj_dir}/gs_camera_poses.pt"
             )
-            
-            # reinitalize the optimizer and gsplats and strategy and pose_adjust
-            # del self.splats, self.optimizers, self.strategy, self.strategy_state, self.pose_adjust, self.pose_optimizers
-            # if opt.doma:
-            #     del self.doma_optimizer
+
             torch.cuda.empty_cache()
             return global_camera_poses
-
-    def train_gs_doma(self,sh_degree_to_use,global_cam_poses_est):
-        opt = self.opt
-        eval_max_step = 5000
-        pbar = tqdm.tqdm(range(0, eval_max_step))
-        frame_0_depth = self.trainset[0]['depth'].to(self.device)
-        frame_0_rgb = self.trainset[0]['image'].reshape(-1, 3).to(self.device) / 255.0
-
-        self.splats, self.optimizers = create_splats_with_optimizers(
-                self.parser,
-                init_type=opt.init_type,
-                init_num_pts=opt.init_num_pts,
-                init_extent=opt.init_extent,
-                init_opacity=opt.init_opa,
-                init_scale=opt.init_scale,
-                scene_scale=self.scene_scale,
-                sh_degree=opt.sh_degree,
-                sparse_grad=opt.sparse_grad,
-                batch_size=opt.batch_size,
-                feature_dim=32 if opt.app_opt else None,
-                device=self.device,
-                world_rank=self.world_rank,
-                world_size=self.world_size,
-                predict_depth = frame_0_depth,
-                predict_rgb = frame_0_rgb
-            )
-
-        self.strategy = DefaultStrategy(
-                verbose=False,
-                scene_scale=self.scene_scale,
-                prune_opa=opt.prune_opa,
-                grow_grad2d=opt.grow_grad2d,
-                grow_scale3d=opt.grow_scale3d,
-                prune_scale3d=opt.prune_scale3d,
-                refine_start_iter=opt.refine_start_iter,
-                refine_stop_iter=opt.refine_stop_iter,
-                reset_every=opt.reset_every,
-                refine_every=opt.refine_every,
-                absgrad=opt.absgrad,
-                revised_opacity=opt.revised_opacity,
-        )
-        self.strategy_state = self.strategy.initialize_state()
-        schedulers = [
-            torch.optim.lr_scheduler.ExponentialLR(
-                self.optimizers["means"], gamma=0.01 ** (1.0 / eval_max_step)
-            ),
-        ]
-
-        # train a first frame
-        height,width = self.trainset[0]['image'].shape[0:2]
-        
-        if opt.doma:
-            doma, doma_optimizer, doma_scheduler= self.init_doma(seq_len=len(self.trainset), device=self.device, max_steps = eval_max_step)
-
-        current_index = 0
-        for step in pbar:
-            # random index
-            current_index = current_index+1 if current_index < len(self.trainset)-1 else 0
-            tidx = torch.Tensor([current_index]).int().squeeze().to(self.device)
-            data = self.trainset[current_index]
-            camtoworlds = torch.Tensor(global_cam_poses_est[current_index]).to(self.device).unsqueeze(0)
-            Ks = data['K'].unsqueeze(0).to(self.device)
-            pixels = data['image'].unsqueeze(0).to(self.device) / 255.0
-            image_ids = torch.Tensor([data["image_id"]]).int().to(self.device)
-            depth = data['depth'].to(self.device)
-            rgb = data['image'].reshape(-1, 3).to(self.device) / 255.0
-            height, width = pixels.shape[1:3]
-            # if opt.depth_loss:
-            depthmap_gt = data['depth_map'].to(self.device)
-            if opt.doma:
-                points, scaled_factor, min_value = normalize_points(self.splats['means'])
-                new_means = doma.deform(points,tidx) 
-                new_means = (new_means+1)/2 * scaled_factor + min_value
-                weight_factor = 1
-                doma_mean = (new_means * weight_factor)
-            
-            renders , alphas, info = self.rasterize_splats(
-                camtoworlds= camtoworlds,
-                Ks=Ks,
-                width=width,
-                height=height,
-                sh_degree=sh_degree_to_use,
-                near_plane=opt.near_plane,
-                far_plane=opt.far_plane,
-                image_ids=image_ids,
-                render_mode="RGB+ED" if opt.depth_loss else "RGB",
-                doma_mean=doma_mean if opt.doma else None
-            )
-            if renders.shape[-1] == 4:
-                colors, depths_0 = renders[..., 0:3], renders[..., 3::]
-            else:
-                colors, depths_0 = renders, None  
-
-            self.strategy.step_pre_backward(
-                params=self.splats,
-                optimizers=self.optimizers,
-                state=self.strategy_state,
-                step=step,
-                info=info,
-            )
-            l1loss = F.l1_loss(colors, pixels)
-            ssimloss = 1.0 - self.ssim(
-                pixels.permute(0, 3, 1, 2), colors.permute(0, 3, 1, 2)
-            )
-            loss = l1loss * (1.0 - opt.ssim_lambda) + ssimloss * opt.ssim_lambda
-
-            if opt.depth_loss:
-                depthloss = F.l1_loss(depths_0.squeeze(-1), depthmap_gt)
-            # if opt.doma:
-            #     loss_homogeneous_reg = doma.model.homogenous_reg(self.splats['means'],tidx)
-            #     # loss_elastic_reg = doma.model.elastic_reg(self.splats['means'],tidx)
-            #     # loss += opt.elastic_loss_weight * loss_elastic_reg + 
-            #     loss += opt.homo_loss_weight * loss_homogeneous_reg
-            desc = f"loss={loss.item():.3f}| " f"sh degree={sh_degree_to_use}| "
-
-            pbar.set_description(desc)
-            loss.backward()
-
-            camtoworlds = camtoworlds.detach()
-
-            self.strategy.step_post_backward(
-                params=self.splats,
-                optimizers=self.optimizers,
-                state=self.strategy_state,
-                step=step,
-                info=info,
-                packed=opt.packed,
-            )
-
-            for optimizer in self.optimizers.values():
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-            for optimizer in self.app_optimizers:
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-            for scheduler in schedulers:
-                scheduler.step()
-
-            doma_optimizer.step()
-            doma_optimizer.zero_grad(set_to_none=True)
-            doma_scheduler.step()
-
-            if step == 3000:
-                self.eval_all(step, self.trainset, torch.stack([torch.Torch(cam_pose).to(self.device) for cam_pose in global_cam_poses_est]).to(self.device),doma_eval=True,doma=doma)
-        # render
-        self.eval_all(current_index, self.trainset, torch.stack([torch.Tensor(cam_pose).to(self.device) for cam_pose in global_cam_poses_est]).to(self.device),doma_eval=True,doma=doma)
-        # save gs
-        data = {"splats": self.splats.state_dict()}
-        torch.save(
-            data, f"{self.ckpt_dir}/gs_doma_{current_index}_rank{self.world_rank}.pt"
-        )
-        # save doma 
-        doma_weights = {"doma": doma.state_dict()}
-        torch.save(
-            doma_weights, f"{self.ckpt_dir}/doma_{current_index}_rank{self.world_rank}.pt"
-        )
-        # save doma config
-        with open(f"{self.ckpt_dir}/config_{current_index}_rank{self.world_rank}.json", "w") as f:
-            json.dump(vars(opt), f)
-
-    def train_gs_doma2(self,sh_degree_to_use,initial_train_step = 5000):
-        opt = self.opt
-        eval_max_step = initial_train_step
-        doma_pbar = tqdm.tqdm(range(0, eval_max_step))
-        gs_max_step = 1000
-        gs_pbar = tqdm.tqdm(range(0, gs_max_step))
-        frame_0_depth = self.trainset[0]['depth'].to(self.device)
-        frame_0_rgb = self.trainset[0]['image'].reshape(-1, 3).to(self.device) / 255.0
-
-        self.splats, self.optimizers = create_splats_with_optimizers(
-                self.parser,
-                init_type=opt.init_type,
-                init_num_pts=opt.init_num_pts,
-                init_extent=opt.init_extent,
-                init_opacity=opt.init_opa,
-                init_scale=opt.init_scale,
-                scene_scale=self.scene_scale,
-                sh_degree=opt.sh_degree,
-                sparse_grad=opt.sparse_grad,
-                batch_size=opt.batch_size,
-                feature_dim=32 if opt.app_opt else None,
-                device=self.device,
-                world_rank=self.world_rank,
-                world_size=self.world_size,
-                predict_depth = frame_0_depth,
-                predict_rgb = frame_0_rgb
-            )
-
-        self.strategy = DefaultStrategy(
-                verbose=False,
-                # scene_scale=self.scene_scale,
-                prune_opa=opt.prune_opa,
-                grow_grad2d=opt.grow_grad2d,
-                grow_scale3d=opt.grow_scale3d,
-                prune_scale3d=opt.prune_scale3d,
-                refine_start_iter=opt.refine_start_iter,
-                refine_stop_iter=opt.refine_stop_iter,
-                reset_every=opt.reset_every,
-                refine_every=opt.refine_every,
-                absgrad=opt.absgrad,
-                revised_opacity=opt.revised_opacity,
-        )
-        self.strategy_state = self.strategy.initialize_state()
-        self.schedulers = [
-            torch.optim.lr_scheduler.ExponentialLR(
-                self.optimizers["means"], gamma=0.01 ** (1.0 / gs_max_step)
-            ),
-        ]
-        
-        frame_0_cam = torch.Tensor(self.trainset[0]['camtoworld']).unsqueeze(0).to(self.device)
-        frame_0_K = self.trainset[0]['K'].unsqueeze(0).to(self.device)
-        frame_0_image_id = torch.Tensor([self.trainset[0]['image_id']]).int().to(self.device)
-        frame_0_pixels = self.trainset[0]['image'].unsqueeze(0).to(self.device) / 255.0
-        height,width = self.trainset[0]['image'].shape[0:2]
-
-        for step in gs_pbar:
-
-            renders , alphas, info = self.rasterize_splats(
-                camtoworlds= frame_0_cam,
-                Ks=frame_0_K,
-                width=width,
-                height=height,
-                sh_degree=sh_degree_to_use,
-                near_plane=opt.near_plane,
-                far_plane=opt.far_plane,
-                image_ids=frame_0_image_id,
-                render_mode="RGB+ED" if opt.depth_loss else "RGB"
-            )
-            if renders.shape[-1] == 4:
-                colors, depths_0 = renders[..., 0:3], renders[..., 3::]
-            else:
-                colors, depths_0 = renders, None  
-
-            self.strategy.step_pre_backward(
-                params=self.splats,
-                optimizers=self.optimizers,
-                state=self.strategy_state,
-                step=step,
-                info=info,
-            )
-            l1loss = F.l1_loss(colors, frame_0_pixels)
-            ssimloss = 1.0 - self.ssim(
-                frame_0_pixels.permute(0, 3, 1, 2), colors.permute(0, 3, 1, 2)
-            )
-            loss = l1loss * (1.0 - opt.ssim_lambda) + ssimloss * opt.ssim_lambda
-
-            # if opt.depth_loss:
-            #     depthloss = F.l1_loss(depths_0.squeeze(-1), depthmap_gt)
-            desc = f"loss={loss.item():.3f}| " f"sh degree={sh_degree_to_use}| "
-
-            gs_pbar.set_description(desc)
-            loss.backward()
-
-            self.strategy.step_post_backward(
-                params=self.splats,
-                optimizers=self.optimizers,
-                state=self.strategy_state,
-                step=step,
-                info=info,
-                packed=opt.packed,
-            )
-
-            for optimizer in self.optimizers.values():
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-            for optimizer in self.app_optimizers:
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-            for scheduler in self.schedulers:
-                scheduler.step()
-            
-                
-
-        if opt.doma:
-            # doma, doma_optimizer, doma_scheduler= self.init_doma(seq_len=len(self.trainset), device=self.device, max_steps = opt.doma_max_step)
-            doma, doma_optimizer, doma_scheduler= self.init_doma(seq_len=len(self.trainset), device=self.device, max_steps = 5000)
-        self.doma = doma
-        self.doma_optimizer = doma_optimizer
-        self.doma_scheduler = doma_scheduler
-        current_index = 0
-        loss_list = []
-        for step in doma_pbar:
-            colors, depths, renders, alphas, info = self.render_with_doma(self.trainset[current_index],sh_degree_to_use)
-            
-            if opt.only_increase_gs:
-                self.strategy.step_pre_backward(
-                    params=self.splats,
-                    optimizers=self.optimizers,
-                    state=self.strategy_state,
-                    step=step,
-                    info=info,
-                )
-
-            gt_pixel = self.trainset[current_index]['image'].unsqueeze(0).to(self.device) / 255.0
-
-            l1loss = F.l1_loss(colors, gt_pixel)
-            ssimloss = 1.0 - self.ssim(
-                gt_pixel.permute(0, 3, 1, 2), colors.permute(0, 3, 1, 2)
-            )
-            loss = l1loss * (1.0 - opt.ssim_lambda) + ssimloss * opt.ssim_lambda
-
-            # if opt.depth_loss:
-            #     depthloss = F.l1_loss(depths_0.squeeze(-1), depthmap_gt)
-            desc = f"loss={loss.item():.3f}| " f"sh degree={sh_degree_to_use}| "
-
-            doma_pbar.set_description(desc)
-            loss.backward()
-
-            if opt.only_increase_gs:
-                # do strategy step backward but without pruning
-                self.strategy._update_state(self.splats, self.strategy_state,info, packed=opt.packed)
-                if step > self.strategy.refine_start_iter and step % self.strategy.refine_every == 0:
-                    n_dupli, n_split = self.strategy._grow_gs(self.splats, self.optimizers, self.strategy_state, step)
-                self.strategy_state["grad2d"].zero_()
-                self.strategy_state["count"].zero_()
-                torch.cuda.empty_cache()
-                if step % self.strategy.reset_every == 0:
-                    reset_opa(
-                        params=self.splats,
-                        optimizers=self.optimizers,
-                        state=self.strategy_state,
-                        value=self.strategy.prune_opa * 2.0,
-                    )
-
-            for optimizer in self.optimizers.values():
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-            for optimizer in self.app_optimizers:
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-            for scheduler in self.schedulers:
-                scheduler.step()
-            self.doma_optimizer.step()
-            self.doma_optimizer.zero_grad(set_to_none=True)
-            self.doma_scheduler.step()
-
-            current_index = current_index+1 if current_index < len(self.trainset)-1 else 0
-            loss_list.append(loss.item())
-
-
-            # if (step+1) % 50 == 0 and step != 0:
-        # # draw loss curve
-        # plt.plot(np.array(loss_list))
-        # plt.savefig(f"{self.ckpt_dir}/loss_curve_doma5000.png")
-        # save gs
-        data = {"splats": self.splats.state_dict()}
-        torch.save(
-            data, f"{self.ckpt_dir}/gs_doma.pt"
-        )
-
-        # save optimizer
-        optimizer_dict = {k:v.state_dict() for k,v in self.optimizers.items()}
-        torch.save(
-            optimizer_dict, f"{self.ckpt_dir}/gs_optimizer.pt"
-        )
-        app_optimizer_dict = {k:v.state_dict() for k,v in self.app_optimizers}
-        torch.save(
-            app_optimizer_dict, f"{self.ckpt_dir}/gs_app_optimizer.pt"
-        )
-
-        torch.save(self.schedulers[0].state_dict(), f"{self.ckpt_dir}/gs_scheduler.pt")
-
-        # save strategy state
-        strategy_state = {"strategy_state": self.strategy_state}
-        torch.save(
-            strategy_state, f"{self.ckpt_dir}/strategy_state.pt"
-        )
-
-        # save doma
-        doma_save = {"doma": doma.model.state_dict(), "doma_optimizer": doma_optimizer.state_dict(), "doma_scheduler": doma_scheduler.state_dict()}
-        torch.save(
-            doma_save, f"{self.ckpt_dir}/doma.pt"
-        )
-        # render
-        self.eval_all(current_index, self.trainset, torch.stack([data['camtoworld'].squeeze(0) for data in self.trainset]).to(self.device),doma_eval=True,doma=self.doma)
-
-        # draw loss curve
-        plt.plot(np.array(loss_list))
-        plt.savefig(f"{self.ckpt_dir}/loss_curve_doma8000.png")
-
-        
-    def train_gs_doma_sem(self,sh_degree_to_use,initial_train_step = 5000):
-        opt = self.opt
-        eval_max_step = initial_train_step
-        doma_pbar = tqdm.tqdm(range(0, eval_max_step))
-        gs_max_step = 1000
-        gs_pbar = tqdm.tqdm(range(0, gs_max_step))
-        frame_0_depth = self.trainset[0]['depth'].to(self.device)
-        frame_0_rgb = self.trainset[0]['image'].reshape(-1, 3).to(self.device) / 255.0
-        # semantics_masks = torch.stack([data["mask"] for data in data_block]).to(device)
-        # depth = depth[semantics_masks[0].view(-1)]
-        # rgb = rgb[semantics_masks[0].view(-1)]
-        frame_0_semantics = self.trainset[0]['mask'].flatten().to(self.device) 
-            
-        if opt.use_all_human_depth:
-            # compose all the depth into one tensor
-            all_depth = []
-            all_rgb = []
-            all_semantics = []
-            for data in self.trainset:
-                depth = data["depth"].to(self.device)
-                rgb = data["image"].reshape(-1, 3).to(self.device) / 255.0
-                if data['image_id'] == 0:
-                    semantics_masks = data["mask"].view(-1).to(self.device)
-                    all_depth.append(depth)
-                    all_rgb.append(rgb)
-                    all_semantics.append(semantics_masks.float())
-                    
-                else:
-                    semantics_masks = ~data["mask"].view(-1).to(self.device)
-                    depth = depth[semantics_masks]
-                    rgb = rgb[semantics_masks]
-
-                    all_semantics.append(torch.zeros(rgb.shape[0]).to(self.device))
-                    all_depth.append(depth)
-                    all_rgb.append(rgb)
-            frame_0_depth = torch.cat(all_depth, dim=0)
-            frame_0_rgb = torch.cat(all_rgb, dim=0)
-            frame_0_semantics = torch.cat(all_semantics, dim=0)
-
-        
-        # duplicate depth and rgb with semantic = 0, add variation to depth 
-        mask_0 = frame_0_semantics == 0
-        frame_0_depth_extra = frame_0_depth[mask_0] + (torch.randn_like(frame_0_depth[mask_0])*2-1) * 0.01
-        frame_0_rgb_extra = frame_0_rgb[mask_0] 
-        frame_0_depth = torch.cat([frame_0_depth, frame_0_depth_extra], dim=0)
-        frame_0_rgb = torch.cat([frame_0_rgb, frame_0_rgb_extra], dim=0)
-        frame_0_semantics = torch.cat([frame_0_semantics, torch.zeros_like(frame_0_semantics[mask_0])], dim=0)
-    
-
-
-
-        self.splats, self.optimizers = create_splats_with_optimizers_sem(
-                self.parser,
-                init_type=opt.init_type,
-                init_num_pts=opt.init_num_pts,
-                init_extent=opt.init_extent,
-                init_opacity=opt.init_opa,
-                init_scale=opt.init_scale,
-                # scene_scale=self.scene_scale,
-                sh_degree=opt.sh_degree,
-                sparse_grad=opt.sparse_grad,
-                batch_size=opt.batch_size,
-                feature_dim=32 if opt.app_opt else None,
-                device=self.device,
-                world_rank=self.world_rank,
-                world_size=self.world_size,
-                predict_depth = frame_0_depth,
-                predict_rgb = frame_0_rgb,
-                semantic_label = frame_0_semantics
-            )
-
-        self.strategy = DefaultStrategy(
-                verbose=False,
-                # scene_scale=self.scene_scale,
-                prune_opa=opt.prune_opa,
-                grow_grad2d=opt.grow_grad2d,
-                grow_scale3d=opt.grow_scale3d,
-                prune_scale3d=opt.prune_scale3d,
-                refine_start_iter=opt.refine_start_iter,
-                refine_stop_iter=opt.refine_stop_iter,
-                reset_every=opt.reset_every,
-                refine_every=opt.refine_every,
-                absgrad=opt.absgrad,
-                revised_opacity=opt.revised_opacity,
-        )
-        self.strategy_state = self.strategy.initialize_state()
-        self.schedulers = [
-            torch.optim.lr_scheduler.ExponentialLR(
-                self.optimizers["means"], gamma=0.01 ** (1.0 / gs_max_step)
-            ),
-        ]
-        
-        frame_0_cam = torch.Tensor(self.trainset[0]['camtoworld']).unsqueeze(0).to(self.device)
-        frame_0_K = self.trainset[0]['K'].unsqueeze(0).to(self.device)
-        frame_0_image_id = torch.Tensor([self.trainset[0]['image_id']]).int().to(self.device)
-        frame_0_pixels = self.trainset[0]['image'].unsqueeze(0).to(self.device) / 255.0
-        frame_0_depth_map = self.trainset[0]['depth_map'].unsqueeze(0).unsqueeze(-1).to(self.device)
-        height,width = self.trainset[0]['image'].shape[0:2]
-
-        for step in gs_pbar:
-
-            renders , alphas, info = self.rasterize_splats(
-                camtoworlds= frame_0_cam,
-                Ks=frame_0_K,
-                width=width,
-                height=height,
-                sh_degree=sh_degree_to_use,
-                near_plane=opt.near_plane,
-                far_plane=opt.far_plane,
-                image_ids=frame_0_image_id,
-                render_mode="RGB+ED" if opt.depth_loss else "RGB",
-                # # backgrounds = torch.tensor(self.opt.background_color,device=self.device).unsqueeze(0) if self.opt.background_color is not None else None
-
-            )
-            if renders.shape[-1] == 4:
-                colors, depths_0 = renders[..., 0:3], renders[..., 3::]
-            else:
-                colors, depths_0 = renders, None  
-
-            self.strategy.step_pre_backward(
-                params=self.splats,
-                optimizers=self.optimizers,
-                state=self.strategy_state,
-                step=step,
-                info=info,
-            )
-            l1loss = F.l1_loss(colors, frame_0_pixels)
-            ssimloss = 1.0 - self.ssim(
-                frame_0_pixels.permute(0, 3, 1, 2), colors.permute(0, 3, 1, 2)
-            )
-            loss = l1loss * (1.0 - opt.ssim_lambda) + ssimloss * opt.ssim_lambda
-
-            if opt.lambda_depth > 0:
-                with torch.no_grad():
-                    A = torch.cat([depths_0, torch.ones_like(depths_0)], dim=-1) # [B, 2]
-                    X = torch.linalg.lstsq(A, depths_0).solution # [2, 1]
-                    valid_pred_depth = A @ X # [B, 1]
-
-                    A_gt = torch.cat([frame_0_depth_map, torch.ones_like(frame_0_depth_map)], dim=-1) # [B, 2]
-                    X_gt = torch.linalg.lstsq(A_gt, frame_0_depth_map).solution # [2, 1]
-                    valid_gt_depth = A_gt @ X_gt # [B, 1]
-                lambda_depth = self.opt.lambda_depth #* min(1, self.global_step / self.opt.iters)
-                loss = loss + lambda_depth * F.mse_loss(valid_pred_depth, valid_gt_depth)
-            # if opt.depth_loss:
-            #     depthloss = F.l1_loss(depths_0.squeeze(-1), depthmap_gt)
-            desc = f"loss={loss.item():.3f}| " f"sh degree={sh_degree_to_use}| "
-
-            gs_pbar.set_description(desc)
-            loss.backward()
-
-            self.strategy.step_post_backward(
-                params=self.splats,
-                optimizers=self.optimizers,
-                state=self.strategy_state,
-                step=step,
-                info=info,
-                packed=opt.packed,
-            )
-
-            for name, optimizer in self.optimizers.items():
-                # leave labels out 
-                if name == 'labels' :
-                    continue
-                else:
-                    optimizer.step()
-                    optimizer.zero_grad(set_to_none=True)
-            for optimizer in self.app_optimizers:
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-            for scheduler in self.schedulers:
-                scheduler.step()
-            
-                
-
-        doma, doma_optimizer, doma_scheduler= self.init_doma(seq_len=len(self.trainset), device=self.device, max_steps = 5000)
-        self.doma = doma
-        self.doma_optimizer = doma_optimizer
-        self.doma_scheduler = doma_scheduler
-        current_index = 0
-        loss_list = []
-        for step in doma_pbar:
-            colors, depths, renders, alphas, info = self.render_with_doma(self.trainset[current_index],sh_degree_to_use)
-            
-            # if opt.only_increase_gs:
-            self.strategy.step_pre_backward(
-                params=self.splats,
-                optimizers=self.optimizers,
-                state=self.strategy_state,
-                step=step,
-                info=info,
-            )
-
-            gt_pixel = self.trainset[current_index]['image'].unsqueeze(0).to(self.device) / 255.0
-            l1loss = F.l1_loss(colors, gt_pixel)
-
-
-            ssimloss = 1.0 - self.ssim(
-                gt_pixel.permute(0, 3, 1, 2), colors.permute(0, 3, 1, 2)
-            )
-
-
-            if 'labels' in self.splats.keys():
-                mask = ~self.trainset[current_index]['mask'].to(self.device) 
-                gt_pixel = gt_pixel*mask
-                colors_dynamic = colors*mask
-                l1loss_dynamic = F.l1_loss(colors_dynamic, gt_pixel)
-                loss = 0.7*l1loss_dynamic + 0.3*l1loss
-            else:
-                loss = l1loss * (1.0 - opt.ssim_lambda) + ssimloss * opt.ssim_lambda
-
-            if opt.lambda_depth > 0:
-                with torch.no_grad():
-                    A = torch.cat([depths, torch.ones_like(depths)], dim=-1) # [B, 2]
-                    X = torch.linalg.lstsq(A, depths).solution # [2, 1]
-                    valid_pred_depth = A @ X # [B, 1]
-
-                    gt_depth = self.trainset[current_index]['depth_map'].unsqueeze(-1).unsqueeze(0).to(self.device)
-
-                    A_gt = torch.cat([gt_depth, torch.ones_like(gt_depth)], dim=-1) # [B, 2]
-                    X_gt = torch.linalg.lstsq(A_gt, gt_depth).solution # [2, 1]
-                    valid_gt_depth = A_gt @ X_gt # [B, 1]
-                lambda_depth = self.opt.lambda_depth #* min(1, self.global_step / self.opt.iters)
-                loss = loss + lambda_depth * F.mse_loss(valid_pred_depth, valid_gt_depth)
-
-
-            # if opt.depth_loss:
-            #     depthloss = F.l1_loss(depths_0.squeeze(-1), depthmap_gt)
-            desc = f"loss={loss.item():.3f}| " f"sh degree={sh_degree_to_use}| "
-
-            doma_pbar.set_description(desc)
-            loss.backward()
-
-            if opt.only_increase_gs:
-                # do strategy step backward but without pruning
-                self.strategy._update_state(self.splats, self.strategy_state,info, packed=opt.packed)
-                if step > self.strategy.refine_start_iter and step % self.strategy.refine_every == 0:
-                    n_dupli, n_split = self.strategy._grow_gs(self.splats, self.optimizers, self.strategy_state, step)
-                self.strategy_state["grad2d"].zero_()
-                self.strategy_state["count"].zero_()
-                torch.cuda.empty_cache()
-                if step % self.strategy.reset_every == 0:
-                    reset_opa(
-                        params=self.splats,
-                        optimizers=self.optimizers,
-                        state=self.strategy_state,
-                        value=self.strategy.prune_opa * 2.0,
-                    )
-            else:
-                self.strategy.step_post_backward(
-                    params=self.splats,
-                    optimizers=self.optimizers,
-                    state=self.strategy_state,
-                    step=step,
-                    info=info,
-                    packed=opt.packed,
-                )
-            # breakpoint()
-            for optimizer in self.optimizers.values():
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-            for optimizer in self.app_optimizers:
-                optimizer.step()
-                optimizer.zero_grad(set_to_none=True)
-            # breakpoint()
-            for scheduler in self.schedulers:
-                scheduler.step()
-            self.doma_optimizer.step()
-            self.doma_optimizer.zero_grad(set_to_none=True)
-            self.doma_scheduler.step()
-
-            current_index = current_index+1 if current_index < len(self.trainset)-1 else 0
-            loss_list.append(loss.item())
-
-            # # save gs every 100 epoch 
-            # if step % 10 == 0 and step != 0:
-            #     self.save_model(step)
-            #     self.eval_all(step, self.trainset, torch.stack([data['camtoworld'].squeeze(0) for data in self.trainset]).to(self.device),doma_eval=self.opt.doma,doma=self.doma)
-            #     self.load_model(step)
-            #     self.splats.train()
-            #     if self.opt.doma:
-            #         self.doma.model.train()
-
-
-        data = {"splats": self.splats.state_dict()}
-        torch.save(
-            data, f"{self.ckpt_dir}/gs_doma.pt"
-        )
-
-        # # save optimizer
-        # optimizer_dict = {k:v.state_dict() for k,v in self.optimizers.items()}
-        # # optimizer_dict['step'] = step
-        # torch.save(
-        #     optimizer_dict, f"{self.ckpt_dir}/gs_optimizer.pt"
-        # )
-        # app_optimizer_dict = {k:v.state_dict() for k,v in self.app_optimizers}
-        # torch.save(
-        #     app_optimizer_dict, f"{self.ckpt_dir}/gs_app_optimizer.pt"
-        # )
-
-        # torch.save(self.schedulers[0].state_dict(), f"{self.ckpt_dir}/gs_scheduler.pt")
-
-        # # save strategy state
-        # strategy_state = {"strategy_state": self.strategy_state}
-        # torch.save(
-        #     strategy_state, f"{self.ckpt_dir}/strategy_state.pt"
-        # )
-
-        # save doma
-        doma_save = {"doma": doma.model.state_dict(), "doma_optimizer": doma_optimizer.state_dict(), "doma_scheduler": doma_scheduler.state_dict()}
-        torch.save(
-            doma_save, f"{self.ckpt_dir}/doma.pt"
-        )
-        # render
-        self.eval_all(current_index, self.trainset, torch.stack([data['camtoworld'].squeeze(0) for data in self.trainset]).to(self.device),doma_eval=True,doma=self.doma)
-
-
-    def save_model(self, epoch):
-        data = {"splats": self.splats.state_dict()}
-        torch.save(
-            data, f"{self.ckpt_dir}/gs_doma_{epoch}.pt"
-        )
-
-        # save optimizer
-        optimizer_dict = {k:v.state_dict() for k,v in self.optimizers.items()}
-        # optimizer_dict['step'] = step
-        torch.save(
-            optimizer_dict, f"{self.ckpt_dir}/gs_optimizer_{epoch}.pt"
-        )
-        app_optimizer_dict = {k:v.state_dict() for k,v in self.app_optimizers}
-        torch.save(
-            app_optimizer_dict, f"{self.ckpt_dir}/gs_app_optimizer_{epoch}.pt"
-        )
-
-        torch.save(self.schedulers[0].state_dict(), f"{self.ckpt_dir}/gs_scheduler_{epoch}.pt")
-
-        # save strategy state
-        strategy_state = {"strategy_state": self.strategy_state}
-        torch.save(
-            strategy_state, f"{self.ckpt_dir}/strategy_state_{epoch}.pt"
-        )
-        if self.opt.doma:
-            # save doma
-            doma_save = {"doma": self.doma.model.state_dict(), "doma_optimizer": self.doma_optimizer.state_dict(), "doma_scheduler": self.doma_scheduler.state_dict()}
-            torch.save(
-                doma_save, f"{self.ckpt_dir}/doma_{epoch}.pt"
-            )
-    
-    def load_model(self, epoch, path = None):
-        if path ==None:
-            path = self.ckpt_dir
-        gs_pre = torch.load(f"{path}/gs_doma_{epoch}.pt")
-        self.splats.load_state_dict(gs_pre['splats'])
-        gs_optimizer_states = torch.load(f"{path}/gs_optimizer_{epoch}.pt")
-        for name,optimizer in self.optimizers.items():
-            if name == 'labels':
-                continue
-            if len(gs_optimizer_states[name]) > 0:
-                optimizer.load_state_dict(gs_optimizer_states[name])
-                #print(lr)
-                print("learning rate for ", name, optimizer.param_groups[0]['lr'])
-        gs_scheduler_states = torch.load(f"{path}/gs_scheduler_{epoch}.pt")
-        # gs_scheduler.load_state_dict(gs_scheduler_states)
-        for index, scheduler in enumerate(self.schedulers):
-            scheduler.load_state_dict(gs_scheduler_states)
-            print("load scheduler for ", index)
-        strategy_state = torch.load(f"{path}/strategy_state_{epoch}.pt")
-        self.strategy_state = strategy_state['strategy_state']
-
-        if self.opt.doma:
-            doma_save = torch.load(f"{path}/doma_{epoch}.pt")
-            self.doma.model.load_state_dict(doma_save['doma'])
-            self.doma_optimizer.load_state_dict(doma_save['doma_optimizer'])
-            self.doma_scheduler.load_state_dict(doma_save['doma_scheduler'])
-
-
 
     def create_strategy(self):
         opt = self.opt
@@ -2074,182 +1089,8 @@ class Runner:
             height, width = pixels.shape[1:3]
             # if opt.depth_loss:
             depthmap_gt = data['depth_map'].to(self.device)
-        if 'labels' in self.splats.keys():
 
-            # overwrite the corresponding points
-
-            renders, alphas, info = self.rasterize_splats_sem(
-                camtoworlds= camtoworlds,
-                Ks=Ks,
-                width=width,
-                height=height,
-                sh_degree=sh_degree_to_use,
-                near_plane=opt.near_plane,
-                far_plane=opt.far_plane,
-                image_ids=image_ids,
-                render_mode="RGB+ED" if opt.depth_loss else "RGB",
-                # # # backgrounds = torch.tensor(self.opt.background_color,device=self.device).unsqueeze(0) if self.opt.background_color is not None else None
-
-
-            )
-        else:
-            points, scaled_factor, min_value = normalize_points(self.splats['means'])
-            new_means = self.doma.deform(points,tidx) 
-            new_means = (new_means+1)/2 * scaled_factor + min_value
-            weight_factor = 1
-            doma_mean = (new_means * weight_factor)
-
-            renders , alphas, info = self.rasterize_splats(
-                camtoworlds= camtoworlds,
-                Ks=Ks,
-                width=width,
-                height=height,
-                sh_degree=sh_degree_to_use,
-                near_plane=opt.near_plane,
-                far_plane=opt.far_plane,
-                # image_ids=image_ids,
-                render_mode="RGB+ED" if opt.depth_loss else "RGB",
-                doma_mean=doma_mean if opt.doma else None,
-                # # # backgrounds = torch.tensor(self.opt.background_color,device=self.device).unsqueeze(0) if self.opt.background_color is not None else None
-
-            )
-
-        if renders.shape[-1] == 4:
-            colors, depths = renders[..., 0:3], renders[..., 3::]
-        else:
-            colors, depths = renders, None
-
-        # breakpoint()
-        # mask = self.select_transparent_pixels(data['image'], transparent_color=[0, 0, 0]).unsqueeze(-1)
-
-        # colors = colors * (~mask.to(self.device))
-        
-        return colors, depths, renders, info
-    
-
-    def render_with_doma(self, data,sh_degree_to_use): # work with dataloader
-        opt = self.opt
-        if len(data['camtoworld'].shape) == 2:
-            camtoworlds = torch.Tensor(data['camtoworld']).unsqueeze(0).to(self.device)
-            tidx = torch.Tensor([data['image_id']]).int().squeeze().to(self.device)
-            Ks = data['K'].unsqueeze(0).to(self.device)
-            pixels = data['image'].unsqueeze(0).to(self.device) / 255.0
-            image_ids = torch.Tensor([data["image_id"]]).int().to(self.device)
-            depth = data['depth'].unsqueeze(0).to(self.device)
-            rgb = data['image'].reshape(-1, 3).to(self.device) / 255.0
-            height, width = pixels.shape[1:3]
-            depthmap_gt = data['depth_map'].unsqueeze(0).to(self.device)  
-        else:
-            camtoworlds = torch.Tensor(data['camtoworld']).to(self.device)
-            tidx = torch.Tensor([data['image_id']]).int().squeeze().to(self.device)
-            Ks = data['K'].to(self.device)
-            pixels = data['image'].to(self.device) / 255.0
-            image_ids = torch.Tensor([data["image_id"]]).int().to(self.device)
-            depth = data['depth'].to(self.device)
-            rgb = data['image'].reshape(-1, 3).to(self.device) / 255.0
-            height, width = pixels.shape[1:3]
-            # if opt.depth_loss:
-            depthmap_gt = data['depth_map'].to(self.device)
-        if 'labels' in self.splats.keys():
-            dynamic_points = self.splats['means'][self.splats['labels'] == 0]
-            points, scaled_factor, min_value = normalize_points(dynamic_points)
-            new_means = self.doma.deform(points,tidx)
-            new_means = (new_means+1)/2 * scaled_factor + min_value
-            weight_factor = 1
-            doma_mean = (new_means * weight_factor)
-
-            # overwrite the corresponding points
-            renders, alphas, info = self.rasterize_splats_sem(
-                camtoworlds= camtoworlds,
-                Ks=Ks,
-                width=width,
-                height=height,
-                sh_degree=sh_degree_to_use,
-                near_plane=opt.near_plane,
-                far_plane=opt.far_plane,
-                image_ids=image_ids,
-                render_mode="RGB+ED" if opt.depth_loss else "RGB",
-                doma_mean=doma_mean if opt.doma else None,
-                # # # backgrounds = torch.tensor(self.opt.background_color,device=self.device).unsqueeze(0) if self.opt.background_color is not None else None
-
-
-            )
-        else:
-            points, scaled_factor, min_value = normalize_points(self.splats['means'])
-            new_means = self.doma.deform(points,tidx) 
-            new_means = (new_means+1)/2 * scaled_factor + min_value
-            weight_factor = 1
-            doma_mean = (new_means * weight_factor)
-
-            renders , alphas, info = self.rasterize_splats(
-                camtoworlds= camtoworlds,
-                Ks=Ks,
-                width=width,
-                height=height,
-                sh_degree=sh_degree_to_use,
-                near_plane=opt.near_plane,
-                far_plane=opt.far_plane,
-                # image_ids=image_ids,
-                render_mode="RGB+ED" if opt.depth_loss else "RGB",
-                doma_mean=doma_mean if opt.doma else None,
-                # # # backgrounds = torch.tensor(self.opt.background_color,device=self.device).unsqueeze(0) if self.opt.background_color is not None else None
-
-
-            )
-
-        if renders.shape[-1] == 4:
-            colors, depths = renders[..., 0:3], renders[..., 3::]
-        else:
-            colors, depths = renders, None
-
-        # breakpoint()
-        # mask = self.select_transparent_pixels(data['image'], transparent_color=[0, 0, 0]).unsqueeze(-1)
-
-        # colors = colors * (~mask.to(self.device))
-        
-        return colors, depths, renders, alphas, info
-
-    def render_with_sf(self, data,sh_degree_to_use): # work with dataloader
-        opt = self.opt
-        if len(data['camtoworld'].shape) == 2:
-            camtoworlds = torch.Tensor(data['camtoworld']).unsqueeze(0).to(self.device)
-            tidx = torch.Tensor([data['image_id']]).int().squeeze().to(self.device)
-            Ks = data['K'].unsqueeze(0).to(self.device)
-            pixels = data['image'].unsqueeze(0).to(self.device) / 255.0
-            image_ids = torch.Tensor([data["image_id"]]).int().to(self.device)
-            depth = data['depth'].unsqueeze(0).to(self.device)
-            rgb = data['image'].reshape(-1, 3).to(self.device) / 255.0
-            height, width = pixels.shape[1:3]
-            depthmap_gt = data['depth_map'].unsqueeze(0).to(self.device)  
-        else:
-            camtoworlds = torch.Tensor(data['camtoworld']).to(self.device)
-            tidx = torch.Tensor([data['image_id']]).int().squeeze().to(self.device)
-            Ks = data['K'].to(self.device)
-            pixels = data['image'].to(self.device) / 255.0
-            image_ids = torch.Tensor([data["image_id"]]).int().to(self.device)
-            depth = data['depth'].to(self.device)
-            rgb = data['image'].reshape(-1, 3).to(self.device) / 255.0
-            height, width = pixels.shape[1:3]
-            # if opt.depth_loss:
-            depthmap_gt = data['depth_map'].to(self.device)
-
-        # points, scaled_factor, min_value = normalize_points(self.splats['means'])
-        # self.splats['means'] = points
-        # new_means = self.doma.deform(points,tidx) 
-        # new_means = (new_means+1)/2 * scaled_factor + min_value
-        # weight_factor = 1
-        # doma_mean = (new_means * weight_factor)
-
-        # ret = self.deform.step(self.splats['means'],tidx)
-        # # overwrite the splats points 
-        # self.splats['means'] = ret['means3D']
-        # self.splats['scales'] = ret['scales']
-        # self.splats['opacities'] = ret['opacity'].squeeze()
-        # self.splats['quats'] = ret['rotations']
-        # self.splats['sh0'] = ret['rgb'].unsqueeze(1)
-
-        
-        renders , alphas, info = self.rasterize_splats(
+        renders, alphas, info = self.rasterize_splats_sem(
             camtoworlds= camtoworlds,
             Ks=Ks,
             width=width,
@@ -2257,15 +1098,17 @@ class Runner:
             sh_degree=sh_degree_to_use,
             near_plane=opt.near_plane,
             far_plane=opt.far_plane,
-            # image_ids=image_ids,
-            render_mode="RGB+ED" if opt.depth_loss else "RGB",
-            # doma_mean=doma_mean if opt.doma else None
+            image_ids=image_ids,
+            render_mode="RGB+ED" if opt.depth_loss else "RGB"
         )
+
         if renders.shape[-1] == 4:
             colors, depths = renders[..., 0:3], renders[..., 3::]
         else:
-            colors, depths = renders, None  
+            colors, depths = renders, None
+        
         return colors, depths, renders, info
+    
 
     def align_pose(self, pose1, pose2):
         mtx1 = np.array(pose1, dtype=np.double, copy=True)
@@ -2334,7 +1177,7 @@ class Runner:
 
 
     @torch.no_grad()
-    def eval_all(self, current_frame, data_block, est_cam_pose,doma_eval=False,doma=None, sf_eval = None,sds= False):
+    def eval_all(self, current_frame, data_block, est_cam_pose):
         """Entry for evaluation."""
         print("Running evaluation...")
         opt = self.opt
@@ -2360,13 +1203,6 @@ class Runner:
             if 'labels' in self.splats.keys():
                 dynamic_points = self.splats['means'][self.splats['labels'] == 0]
                 points, scaled_factor, min_value = normalize_points(dynamic_points)
-                if self.opt.doma:
-                    new_means = self.doma.deform(points,tidx)
-                    new_means = (new_means+1)/2 * scaled_factor + min_value
-                    weight_factor = 1
-                    doma_mean = (new_means * weight_factor)
-                else:
-                    pass
 
                 # overwrite the corresponding points
                 renders, alphas, info = self.rasterize_splats_sem(
@@ -2377,29 +1213,12 @@ class Runner:
                     sh_degree=opt.sh_degree,
                     near_plane=opt.near_plane,
                     far_plane=opt.far_plane,
-                    render_mode="RGB+ED" if opt.depth_loss else "RGB",
-                    doma_mean=doma_mean if opt.doma else None,
-                    # # # backgrounds = torch.tensor(self.opt.background_color,device=self.device).unsqueeze(0) if self.opt.background_color is not None else None
-
+                    render_mode="RGB+ED" if opt.depth_loss else "RGB"
 
             )
 
             else:
-                if doma_eval:
-                    points, scaled_factor, min_value = normalize_points(self.splats['means'])
-                    new_means = doma.deform(points,tidx) 
-                    new_means = (new_means+1)/2 * scaled_factor + min_value
-                    doma_mean = new_means
-                if sf_eval:
-                    ret = self.deform.step(self.splats['means'],tidx)
-                    # overwrite the splats points
-                    self.splats['means'] = ret['means3D']
-                    self.splats['scales'] = ret['scales']
-                    self.splats['opacities'] = ret['opacity'].squeeze()
-                    self.splats['quats'] = ret['rotations']
-                    self.splats['sh0'] = ret['rgb'].unsqueeze(1)
 
-                # render the splats
                 renders, _, _ = self.rasterize_splats(
                     camtoworlds=camtoworlds,
                     Ks=Ks,
@@ -2408,9 +1227,7 @@ class Runner:
                     sh_degree=opt.sh_degree if not self.opt.dino else None,
                     near_plane=opt.near_plane,
                     far_plane=opt.far_plane,
-                    render_mode="RGB+ED" if opt.depth_loss else "RGB",
-                    doma_mean=doma_mean if doma_eval else None,
-                    # # # backgrounds = torch.tensor(self.opt.background_color,device=self.device).unsqueeze(0) if self.opt.background_color is not None else None
+                    render_mode="RGB+ED" if opt.depth_loss else "RGB"
 
                 )  # [1, H, W, 3]  
             if renders.shape[-1] == 4:
@@ -2428,65 +1245,19 @@ class Runner:
                 canvas = torch.cat([dino_emb, colors], dim=2).squeeze(0).cpu().numpy()
             else:
                 canvas = torch.cat([pixels, colors], dim=2).squeeze(0).cpu().numpy()
-            if doma_eval:
-                if not sds:
-                    imageio.imwrite(
-                        f"{self.doma_render_dir}/{data['image_id']:04d}_doma.png",
-                        (canvas * 255).astype(np.uint8),
-                    )
-                    print(f"Image saved to {self.doma_render_dir}/{data['image_id']:04d}_doma.png")
-                    # seperately save colors and pixesl 
-                    imageio.imwrite(
-                        f"{self.doma_render_dir}/color_{data['image_id']:04d}_doma.png",
-                        (colors.squeeze(0).cpu().numpy() * 255).astype(np.uint8),
-                    )
-                    imageio.imwrite(
-                        f"{self.doma_render_dir}/original_{data['image_id']:04d}_doma.png",
-                        (pixels.squeeze(0).cpu().numpy() * 255).astype(np.uint8))
-                    # save plg
-                    labels = torch.round(self.splats["labels"]).int()
-                    temp_mean = torch.zeros_like(self.splats["means"])
-                    temp_mean[labels == 0] += doma_mean
-                    # means[labels == 0] = doma_mean
-                    # means = torch.where(labels == 0, doma_mean, means)
-                    # means[labels == 0] *= 1e-6
-                    save_means = torch.where(labels.unsqueeze(-1) == 0, temp_mean, self.splats["means"])
-
-                    self.save_ply(f"{self.point_cloud_dir}/{data['image_id']:04d}_doma.ply",save_means)
-                elif "labels" in self.splats.keys():
-                    # points, scaled_factor, min_value = normalize_points(self.splats['means'])
-                    # new_means = doma.deform(points,tidx) 
-                    # new_means = (new_means+1)/2 * scaled_factor + min_value
-                    # doma_mean = new_means
-                    
-                    # labels = torch.round(self.splats["labels"]).int()
-                    # temp_mean = torch.zeros_like(self.splats["means"])
-                    # temp_mean[labels == 0] += doma_mean
-                    # save_means = torch.where(labels.unsqueeze(-1) == 0, temp_mean, self.splats["means"])
-
-                    self.save_ply(f"{self.point_cloud_dir}/sds_{current_frame}_{data['image_id']:04d}_doma.ply",self.splats["means"]) 
-                else:
-                    self.save_ply(f"{self.point_cloud_dir}/sds_{current_frame}_{data['image_id']:04d}_doma.ply",self.splats["means"])
-
-            if sf_eval:
-                imageio.imwrite(
-                    f"{self.doma_render_dir}/{current_frame}_{data['image_id']:04d}_sf.png",
-                    (canvas * 255).astype(np.uint8),
-                )
-                print(f"Image saved to {self.doma_render_dir}/{data['image_id']:04d}_sf.png")
-
-            else:
-                imageio.imwrite(
-                    f"{self.render_dir}/val_{current_frame}_{data['image_id']:04d}.png",
-                    (canvas * 255).astype(np.uint8),
-                )
-                print(f"Image saved to {self.render_dir}/val_{current_frame}_{data['image_id']:04d}.png")
             
-            if opt.depth_loss:
-                canvas_depth = (depths_0.squeeze(0).cpu().numpy()* 255)
 
-                # Save the grayscale depth map
-                cv2.imwrite(f"{self.depth_dir}/val_{data['image_id']:04d}.png",canvas_depth)
+            imageio.imwrite(
+                f"{self.render_dir}/val_{current_frame}_{data['image_id']:04d}.png",
+                (canvas * 255).astype(np.uint8),
+            )
+            print(f"Image saved to {self.render_dir}/val_{current_frame}_{data['image_id']:04d}.png")
+        
+        if opt.depth_loss:
+            canvas_depth = (depths_0.squeeze(0).cpu().numpy()* 255)
+
+            # Save the grayscale depth map
+            cv2.imwrite(f"{self.depth_dir}/val_{data['image_id']:04d}.png",canvas_depth)
             if self.opt.dino:
                 pixels = dino_emb  # [1, 3, H, W]
             pixels = pixels.permute(0, 3, 1, 2)  # [1, 3, H, W]
@@ -2520,215 +1291,5 @@ class Runner:
             for k, v in stats.items():
                 self.writer.add_scalar(f"val/{k}", v, data["image_id"])
             self.writer.flush()
-            # self.save_ply(f"{self.point_cloud_dir}/{current_frame}_{data['image_id']:04d}.ply",self.splats["means"], self.splats['sh0'])
 
         return psnr, ssim, lpips,stats
-    @torch.no_grad()
-    def render_traj(self, step: int):
-        """Entry for trajectory rendering."""
-        print("Running trajectory rendering...")
-        opt = self.opt
-        device = self.device
-
-        camtoworlds = self.parser.camtoworlds[5:-5]
-        camtoworlds = generate_interpolated_path(camtoworlds, 1)  # [N, 3, 4]
-        camtoworlds = np.concatenate(
-            [
-                camtoworlds,
-                np.repeat(np.array([[[0.0, 0.0, 0.0, 1.0]]]), len(camtoworlds), axis=0),
-            ],
-            axis=1,
-        )  # [N, 4, 4]
-
-        camtoworlds = torch.from_numpy(camtoworlds).float().to(device)
-        K = torch.from_numpy(list(self.parser.Ks_dict.values())[0]).float().to(device)
-        width, height = list(self.parser.imsize_dict.values())[0]
-
-        canvas_all = []
-        for i in tqdm.trange(len(camtoworlds), desc="Rendering trajectory"):
-            renders, _, _ = self.rasterize_splats(
-                camtoworlds=camtoworlds[i : i + 1],
-                Ks=K[None],
-                width=width,
-                height=height,
-                sh_degree=opt.sh_degree,
-                near_plane=opt.near_plane,
-                far_plane=opt.far_plane,
-                render_mode="RGB+ED",
-            )  # [1, H, W, 4]
-            colors = torch.clamp(renders[0, ..., 0:3], 0.0, 1.0)  # [H, W, 3]
-            depths = renders[0, ..., 3:4]  # [H, W, 1]
-            depths = (depths - depths.min()) / (depths.max() - depths.min())
-
-            # write images
-            canvas = torch.cat(
-                [colors, depths.repeat(1, 1, 3)], dim=0 if width > height else 1
-            )
-            canvas = (canvas.cpu().numpy() * 255).astype(np.uint8)
-            canvas_all.append(canvas)
-
-        # save to video
-        video_dir = f"{opt.workspace}/videos"
-        os.makedirs(video_dir, exist_ok=True)
-        writer = imageio.get_writer(f"{video_dir}/traj_{step}.mp4", fps=30)
-        for canvas in canvas_all:
-            writer.append_data(canvas)
-        writer.close()
-        print(f"Video saved to {video_dir}/traj_{step}.mp4")
-    
-    def eval_pose(self, pose_path,  interpolate=True):
-        """Evaluate camera pose."""
-        # pose_path = os.path.join(result_path, 'ep00_init.pth')
-        # breakpoint()
-        base_dir = os.path.dirname(pose_path)
-        result_path = os.path.dirname(pose_path)
-        poses = torch.load(pose_path)
-        gt_pose = torch.from_numpy(np.load(base_dir+"/traj_est.npy")) # 
-        poses_pred = torch.Tensor(poses['global_cam_poses_est'])
-        # poses_gt_c2w = torch.Tensor(poses['global_cam_poses_gt']) 
-        poses_gt_c2w = gt_pose
-        print("poses_pred[0]", poses_pred[0])
-        print("poses_gt_c2w[0]", poses_gt_c2w[0])
-        poses_gt = poses_gt_c2w[:len(poses_pred)].clone() 
-        if True: 
-            poses_gt = poses_gt[:len(poses_pred)].clone()+ torch.randn(poses_gt[:len(poses_pred)].shape)*0.01
-            # poses_gt = np.load(pose_path.split("/")[:-1]+"/traj_est.npy")
-        # align scale first (we do this because scale differennt a lot)
-        trans_gt_align, trans_est_align, _ = self.align_pose(poses_gt[:, :3, -1].numpy(),
-                                                             poses_pred[:, :3, -1].numpy())
-        print("trans_gt_align[0]", trans_gt_align[0])
-        print("trans_est_align[0]", trans_est_align[0])
-        poses_gt[:, :3, -1] = torch.from_numpy(trans_gt_align)
-        poses_pred[:, :3, -1] = torch.from_numpy(trans_est_align)
-
-        c2ws_est_aligned = align_ate_c2b_use_a2b(poses_pred, poses_gt)
-
-        ate = compute_ATE(poses_gt.cpu().numpy(),
-                          c2ws_est_aligned.cpu().numpy())
-        rpe_trans, rpe_rot = compute_rpe(
-            poses_gt.cpu().numpy(), c2ws_est_aligned.cpu().numpy())
-        print("{0:.3f}".format(rpe_trans*100),
-              '&' "{0:.3f}".format(rpe_rot * 180 / np.pi),
-              '&', "{0:.3f}".format(ate))
-        plot_pose(poses_gt, c2ws_est_aligned, pose_path)
-       
-        print("reults saved in ", result_path)
-        with open(f"{result_path}/pose_eval.txt", 'w') as f:
-            f.write("RPE_trans: {:.03f}, RPE_rot: {:.03f}, ATE: {:.03f}".format(
-                rpe_trans*100,
-                rpe_rot * 180 / np.pi,
-                ate))
-            f.close()
-        
-
-
-
-    def eval_pose_droid(self, pose_path,  interpolate=True,disable_plot=False):
-        """Evaluate camera pose."""
-        # pose_path = os.path.join(result_path, 'ep00_init.pth')
-        base_dir = os.path.dirname(pose_path)
-        result_path = os.path.dirname(pose_path)
-        poses = torch.load(pose_path)
-        gt_pose = torch.from_numpy(np.load(base_dir+"/traj_est.npy"))
-        poses_pred = torch.Tensor(poses['global_cam_poses_est'])
-        # poses_gt_c2w = gt_pose
-        # poses_gt = poses_gt_c2w[:len(poses_pred)].clone()
-        output_path = os.path.join(result_path, 'pose_vis_traj.png')
-        # gt_pose = gt_pose[:20,:]
-        # poses_pred = poses_pred[:20,:,:]
-
-        from evo.core.trajectory import PoseTrajectory3D,PosePath3D
-
-        from evo.tools import plot
-        import copy
-        from evo.core.metrics import PoseRelation
-        traj_ref = PosePath3D(
-        positions_xyz=gt_pose[:,:3],
-        orientations_quat_wxyz=gt_pose[:,3:])
-        
-
-        
-
-        traj_est = PosePath3D(poses_se3=poses_pred)
-        traj_est_aligned = copy.deepcopy(traj_est)
-        traj_est_aligned.align(traj_ref, correct_scale=True,
-                           correct_only_scale=False)
-        traj_est_aligned.align(traj_ref, correct_scale=True,
-                           correct_only_scale=False)
-        fig = plt.figure()
-        traj_by_label = {
-            # "estimate (not aligned)": traj_est,
-            "Ours (aligned)": traj_est_aligned,
-            # "Ground-truth": traj_ref
-            "Droid": traj_ref
-        }
-        plot_mode = plot.PlotMode.xyz
-        # ax = plot.prepare_axis(fig, plot_mode, 111)
-        ax = fig.add_subplot(111, projection="3d")
-        ax.xaxis.set_tick_params(labelbottom=True)
-        ax.yaxis.set_tick_params(labelleft=True)
-        ax.zaxis.set_tick_params(labelleft=True)
-        ax.set_xlabel('X')
-        ax.set_ylabel('Y')
-        ax.set_zlabel('Z')
-        colors = ['r', 'b']
-        styles = ['-', '--']
-
-        for idx, (label, traj) in enumerate(traj_by_label.items()):
-            plot.traj(ax, plot_mode, traj,
-                    styles[idx], colors[idx], label)
-            # break
-        # plot.trajectories(fig, traj_by_label, plot.PlotMode.xyz)
-        ax.view_init(elev=10., azim=45)
-        plt.tight_layout()
-        # pose_vis_path = os.path.join(os.path.dirname(output_path), 'pose_vis.png')
-        pose_vis_path = output_path 
-        fig.savefig(pose_vis_path)
-
-        dic = {
-            'traj_est_aligned': traj_est_aligned.positions_xyz,
-            'traj_ref': traj_ref.positions_xyz,
-            'traj_est_aligned_wxyz': traj_est_aligned.orientations_quat_wxyz,
-            'traj_ref_wxyz': traj_ref.orientations_quat_wxyz
-        }
-        # breakpoint()
-        torch.save(dic, os.path.join(self.ckpt_dir, "aligned_pose.pt"))
-        print("save to ", os.path.join(self.ckpt_dir, "aligned_pose.pt"))
-
-
-def main(local_rank: int, world_rank, world_size: int, opt):
-    global starttime
-    starttime = time.time()
-    # make starttime global
-
-    runner = Runner(local_rank, world_rank, world_size, opt)
-
-
-    if opt.pose_ckpt is not None and opt.eval_pose:
-        runner.eval_pose_droid(opt.pose_ckpt,opt.disable_plot)
-    else:
-        runner.train()
-
-    #eval camera pose
-    
-    endtime = time.time()
-    print("Total time: ", endtime - starttime)
-
-
-
-if __name__ == "__main__":
-    """
-    Usage:
-
-    ```bash
-    # Single GPU training
-    CUDA_VISIBLE_DEVICES=0 python simple_trainer.py
-
-    # Distributed training on 4 GPUs: Effectively 4x batch size so run 4x less steps.
-    CUDA_VISIBLE_DEVICES=0,1,2,3 python simple_trainer.py --steps_scaler 0.25
-
-    """
-
-    opt = tyro.cli(Config)
-    opt.adjust_steps(opt.steps_scaler)
-    cli(main, opt, verbose=True)

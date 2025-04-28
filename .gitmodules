@@ -5,3 +5,6 @@
 [submodule "viser"]
 	path = viser
 	url = https://github.com/junyi42/viser
+[submodule "gs/Marigold"]
+	path = gs/Marigold
+	url = https://github.com/prs-eth/Marigold.git

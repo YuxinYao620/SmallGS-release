@@ -150,3 +150,13 @@ dmypy.json
 .pyre/
 zilejNuE
 waymo_processed.zip
+
+physgs_temp.py
+gs/gs_diff_physGau.py
+gs/exporter.py
+gs/cf3dgs.py
+gs/simple_cf3dgs.py
+third_party/RAFT/models
+third_party/sam2/checkpoints
+third_party/__pycache__
+visualizer_monst3r.py

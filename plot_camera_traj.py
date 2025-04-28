@@ -17,47 +17,35 @@ def argparse():
 
 
     return parser.parse_args()
-if __name__ == "__main__":
 
+def argparse():
+    import argparse
+    parser = argparse.ArgumentParser(description='Evaluate the camera poses')
+    parser.add_argument('--output_dir', type=str, help='Path to the file containing the camera poses of monst3r, refined, gs, cf3dgs, droid')
+    parser.add_argument('--gs_dir', type=str, help='Path to the file containing the camera poses of Smallgs')
+    parser.add_argument('--refined_dir', type=str, help='Path to the file containing the camera poses of refine(smallGS)')
+    return parser.parse_args()
+
+if __name__ == "__main__":
+    args = argparse()
     import pickle
-    # with open("data/tum/tum_cam_poses_all_0.07.pkl", 'rb') as f:
-    with open("data/tum/tum_cam_poses_static_gt_3.pkl", 'rb') as f:
+    with open("data/tum/tum_cam_poses_static_gt.pkl", 'rb') as f:
         save = pickle.load(f)
-    # if args.save_dir is not None:
-    #     with open(os.path.join(args.save_dir), 'rb') as f:
-    #         save = pickle.load(f)
     seq_ind = save['selected_frames']
     gt_cam_poses = save['cam_poses']
     dataset_name = save['dataset']
-    # output_dir = "tum_walking_static/tum_rgb_refine_pose_copy/"
-    # output_dir = "/scratch/yy561/monst3r/tum_02ssim/tum_rgb_refine_pose/"
-    output_dir = "/scratch/yy561/monst3r/paper_example/tum_02ssim/tum_rgb_refine_pose_dino16"
+    output_dir = args.output_dir
+    refined_dir = args.refined_dir
+    gs_dir = args.gs_dir
 
     for ind in range(len(seq_ind)):
-        # if seq_ind[ind] not in [(180,209),(360, 289),(510,539), (30,59)]:
-        if seq_ind[ind][0] in [180, 360, 510, 30] and seq_ind[ind][-1] in [209, 389, 539, 59]:
-            pass
-        else:
-            continue
-        if "sitting" in dataset_name[ind]:
-            continue
-        # args = argparse()
-        # output_dir = args.file_name.split('/')[:-1]
-        # output_dir = '/'.join(output_dir)
-        # seq_dir = args.file_name.split('/')[-1]
-        # output_path = os.path.join(output_dir, seq_dir, 'pose_vis.png')
-
         seq = '{}_seq_{}_{}'.format(dataset_name[ind],seq_ind[ind][0], seq_ind[ind][-1])
         monst3r_output_dir = output_dir
         gt_pose_dir = output_dir
         cf3dgs_output_dir = output_dir
         droid_pose = output_dir
-        # refined_dir = "tum_walking_static/tum_rgb_dino_refine_pose_16/" # change this to the path of the refined poses intermediate/dino
-        # gs_dir = "tum_walking_static/tum_rgb_dino_refine_pose_16/" # change this to the path of the gs poses intermediate/dino
-        refined_dir = "tum_02ssim/tum_rgb_refine_pose_dino16/"
-        gs_dir = "tum_02ssim/tum_rgb_refine_pose_dino16/"
-        # load the camera poses
-        # traj_gt, traj_monster, traj_refined, traj_gs, traj_cf3dgs, traj_droid = eval_monst3r_gs_poses(seq_dir, output_dir)
+        refined_dir = args.refined_dir
+        gs_dir = args.gs_dir
 
         monst3r_traj_path  = f'{output_dir}/{seq}/pred_traj.txt'
         refined_traj_path = f'{refined_dir}/{seq}/refined_pose.txt'
@@ -69,10 +57,6 @@ if __name__ == "__main__":
         traj_gs = None
         traj_cf3dgs = None
         traj_droid = None
-
-        # gt_path = f'{output_dir}/{seq}/cam_poses.npy'
-        # gt_pose = np.load(gt_path)
-        # timestamps_mat = np.arange(gt_pose.shape[0]).astype(float)
 
         gt_path = f'{output_dir}/{seq}/cam_poses_traj.npy'
         gt_pose = np.load(gt_path) 
@@ -135,52 +119,13 @@ if __name__ == "__main__":
         traj_cf3dgs.align(traj_gt, correct_scale=True)
         traj_droid.align(traj_gt, correct_scale=True)
 
-        
-
-
         labels = ["Ground-truth", "Monst3r", "Refined", "SmallGS", "CF3DGS", "Droid"]
         styles = [':', '--', '-.', '-', '-.', '--']
         colors = ['r', 'b', 'g', 'c', 'm', 'y']
 
-        # colors = {'Ground-truth': 'r', 'Monst3r': '#0EA5E9', 'Refined': 'g', 'SmallGS': 'c', 'CF3DGS': 'm', 'Droid': 'y'}
         colors = {'Ground-truth': 'r', 'Monst3r': 'c', 'Refined': 'g', 'SmallGS': 'b', 'CF3DGS': 'm', 'Droid': 'y'}
         styles = {'Ground-truth': ':', 'Monst3r': '--', 'Refined': '-.', 'SmallGS': '-', 'CF3DGS': '-.', 'Droid': '--'}
 
-        # traj_by_label = {
-        #     "Ground-truth": traj_gt,
-        #     "Monst3r": traj_monster,
-        #     # "Refined": traj_refined,
-        #     # "CF3DGS": traj_cf3dgs,
-        #     # "Droid": traj_droid,
-        #     "SmallGS": traj_gs,
-        # }
-
-        # ax.set_xlabel('X')
-        # ax.set_ylabel('Y')
-        # ax.set_zlabel('Z')
-
-        # Use scientific notation for tick labels
-        # formatter = ScalarFormatter()
-        # formatter.set_scientific(True)
-        # formatter.set_powerlimits((-2, 2))
-
-        # ax.xaxis.set_major_formatter(formatter)
-        # ax.yaxis.set_major_formatter(formatter)
-        # ax.zaxis.set_major_formatter(formatter)
-
-        # # Rotate the tick labels
-        # for label in ax.get_xticklabels():
-        #     label.set_rotation(45)
-        # for label in ax.get_yticklabels():
-        #     label.set_rotation(45)
-        # for label in ax.get_zticklabels():
-        #     label.set_rotation(45)
-
-        # # Reduce the number of ticks
-        # ax.xaxis.set_major_locator(plt.MaxNLocator(5))
-        # ax.yaxis.set_major_locator(plt.MaxNLocator(5))
-        # ax.zaxis.set_major_locator(plt.MaxNLocator(5))
-        
         for timestamp in timestamps_mat:
             timestamp = int(timestamp)+1
             plot_gt = PoseTrajectory3D(
@@ -207,7 +152,6 @@ if __name__ == "__main__":
                 positions_xyz=traj_droid.positions_xyz[:timestamp],
                 orientations_quat_wxyz=traj_droid.orientations_quat_wxyz[:timestamp],
                 timestamps=np.array(timestamps_mat[:timestamp]))
-            # traj_by_label = {
 
             traj_by_label = {
             "Ground-truth": plot_gt,
@@ -218,7 +162,6 @@ if __name__ == "__main__":
             "SmallGS": plot_gs,
             }
             plot_mode = plot.PlotMode.xyz
-            # ax = plot.prepare_axis(fig, plot_mode, 111)
             fig = plt.figure()
             ax = fig.add_subplot(111, projection="3d")
             ax.xaxis.set_tick_params(labelbottom=False)
@@ -229,16 +172,10 @@ if __name__ == "__main__":
                 # try:
                 plot.traj(ax, plot_mode, traj,
                         styles[label], colors[label], label)
-                    # plot.trajectories(fig, traj_by_label, plot.PlotMode.xyz, ax, plot.PlotStyle(label), colors)
-                # except:
-                #     breakpoint()
-                    # break
             ax.legend(fontsize=16)
             ax.view_init(elev=10., azim=45)
             plt.tight_layout()
-            # pose_vis_path = os.path.join(os.path.dirname(output_path), 'pose_vis.png')
             output_path = os.path.join(output_dir, "paper_monst3r_gs_final2","{}_{}".format(seq_ind[ind][0], seq_ind[ind][-1]), "{}_{}.png".format(seq,timestamp))
 
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            # output_path = os.path.join(output_dir, "pose_img_dino16", "{}.png".format(seq))
             fig.savefig(output_path)
