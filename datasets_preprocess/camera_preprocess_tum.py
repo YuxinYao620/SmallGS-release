@@ -59,7 +59,7 @@ def associate(first_list, second_list, offset, max_difference):
     matches.sort()
     return matches
 
-dirs = glob.glob("../data/tum/*/")
+dirs = glob.glob("data/tum/*/")
 dirs = sorted(dirs)
 
 # extract frames
@@ -96,7 +96,6 @@ for dir in dirs:
     for i in range(len(gt)):
         # tx ty tz qx qy qz qw
         q = np.array([float(x) for x in gt[i][4:]])
-        # q = np.roll(q, 1)
         q = np.array([q[3], q[0], q[1], q[2]])
 
         t = np.array([float(x) for x in gt[i][1:4]])
@@ -104,7 +103,6 @@ for dir in dirs:
         cam_ext_i[:3, :3] = R.from_quat(q, scalar_first = True).as_matrix()
         cam_ext_i[:3, 3] = t
         cam_exts.append(cam_ext_i)
-        # cam_quats.append(gt[i][[]])
         cam_quats.append(np.array(np.concatenate([t, q])))
 
         
@@ -191,6 +189,5 @@ for dir in dirs:
 print(dir, "\n", "Save Number of frames: ", num_frames, "Sliding window: ", sliding_window)
 import pickle
 print(len(save['selected_frames']))
-breakpoint()
-with open(f"../data/tum/tum_cam_poses_static_gt_test.pkl", "wb") as f:
+with open(f"data/tum/tum_meta.pkl", "wb") as f:
     pickle.dump(save, f)

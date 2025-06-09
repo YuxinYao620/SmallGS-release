@@ -10,16 +10,63 @@ This repository is the official implementation of the paper:
 [*Yuxin Yao*](https://yuxinyao620.github.io/)
 [*Yan Zhang*](https://yz-cnsdqz.github.io/)
 [*Zhening Huang*](https://zheninghuang.github.io/)
+[*Joan Lasenby*](https://www.eng.cam.ac.uk/profiles/jl221)
 Arxiv, 2025. [**[Project Page]**](https://yuxinyao620.github.io/SmallGS/) [**[Paper]**](https://arxiv.org/pdf/2504.17810)
-
 ![Teaser](assets/teaser.jpg)
  
 ### Installation
 1. Clone SmallGS
 ```
-git clone https://github.com/YuxinYao620/SmallGS-release.git
+git clone --recursive https://github.com/YuxinYao620/SmallGS-release.git
 ```
+
+2. Download Checkpoints following  [MonST3R](https://github.com/Junyi42/monst3r.git)
+
+3. Create the environment, here we use anaconda here:
+```
+conda env create -f environment.yml
+```
+3. If you didn't recursively clone this repository, set up the croco and viser according to MonST3R.
+```
+git clone https://github.com/junyi42/viser viser
+git clone https://github.com/junyi42/croco croco
+```
+4. Download the TUM-Dynamics dataset following MonST3R. Then proprocess: 
+
+```
+cd data
+bash download_tum_dynamics.sh
+cd ..
+python datasets_preprocess/camera_preprocess_tum.py 
+```
+5. Predict the camera pose. 
+- "--gs_pose" triggers the SmallGS. 
+- "--dino" triggers the SmallGS with DINOv2 feature maps. 
+- "--dino_dim" triggers the number of channels in the DINOv2 feature map used for SmallGS. 
+```
+python main.py --input_dir data/tum/tum_meta.pkl  --output_dir tum/result_dir/ --gs_pose --dino --dino_dim
+```
+6. Evaluate the predicted camera trajectories for ATE, RPE and $\delta v$
+```
+python batch_eval_camera.py --meta_dir data/tum/tum_meta.pkl --result_dir tum/result_dir/
+python batch_eval_camera_velocity.py --meta_dir data/tum/tum_meta.pkl --result_dir tum/result_dir/
+```
+### Citation
+If you find our work useful, please cite:
+```
+@article{yao2025smallgs,
+  title={SmallGS: Gaussian Splatting-based Camera Pose Estimation for Small-Baseline Videos},
+  author={Yao, Yuxin and Zhang, Yan and Huang, Zhening and Lasenby, Joan},
+  journal={arXiv preprint arXiv:2504.17810},
+  year={2025}
+}
+```
+### Acknowledgement
+Our code is based on MonST3R and Gsplat, and our visualization code is based on Viser. We thank the authors for their excellent work!
+
 <!-- ## Getting Started
+# git clone https://github.com/junyi42/croco croco
+
 
 
 
