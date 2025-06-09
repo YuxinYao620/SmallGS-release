@@ -21,7 +21,6 @@ from dust3r.cloud_opt import global_aligner, GlobalAlignerMode
 from dust3r.utils.viz_demo import convert_scene_output_to_glb, get_dynamic_mask_from_pairviewer
 import matplotlib.pyplot as pl
 import time
-# from gs.gs_diff_copy import Runner
 from gs.gs_diff import Runner
 from pathlib import Path
 from evo.core.trajectory import PoseTrajectory3D,PosePath3D
@@ -40,17 +39,11 @@ batch_size = 1
 def get_args_parser():
     parser = argparse.ArgumentParser()
     parser_url = parser.add_mutually_exclusive_group()
-    parser_url.add_argument("--local_network", action='store_true', default=False,
-                            help="make app accessible on local network: address will be set to 0.0.0.0")
-    parser_url.add_argument("--server_name", type=str, default=None, help="server url, default is 127.0.0.1")
     parser.add_argument("--image_size", type=int, default=512, choices=[512, 224], help="image size")
-    parser.add_argument("--server_port", type=int, help=("will start gradio app on this port (if available). "
-                                                         "If None, will search for an available port starting at 7860."),
-                        default=None)
     parser.add_argument("--weights", type=str, help="path to the model weights", default='checkpoints/MonST3R_PO-TA-S-W_ViTLarge_BaseDecoder_512_dpt.pth')
     parser.add_argument("--model_name", type=str, default='Junyi42/MonST3R_PO-TA-S-W_ViTLarge_BaseDecoder_512_dpt', help="model name")
     parser.add_argument("--device", type=str, default='cuda', help="pytorch device")
-    parser.add_argument("--output_dir", type=str, default='./demo_tmp', help="value for tempfile.tempdir")
+    parser.add_argument("--output_dir", type=str, default='./results', help="default output directory")
     parser.add_argument("--silent", action='store_true', default=False,
                         help="silence logs")
     parser.add_argument("--input_dir", type=str, help="Path to input images directory", default=None)
@@ -107,10 +100,6 @@ def get_args_parser():
     parser.add_argument('--pose_opt_lr', type=float, default=1e-2, help="Learning rate for camera optimization")
     parser.add_argument('--pose_opt_reg', type=float, default=1e-5, help="Regularization for camera optimization as weight decay")
     parser.add_argument('--pose_noise', type=float, default=0.0, help="Add noise to camera extrinsics. This is only to test the camera pose optimization.")
-    parser.add_argument('--cf3dgs_position_lr_init', type=float, default=0.00016, help="Initial learning rate for cf3dgs position")
-    parser.add_argument('--cf3dgs_position_lr_final', type=float, default=0.0000016, help="Final learning rate for cf3dgs position")
-    parser.add_argument('--cf3dgs_position_lr_delay_mult', type=float, default=0.01, help="Delay multiplier for cf3dgs position learning rate")
-    parser.add_argument('--cf3dgs_position_lr_max_steps', type=int, default=30000, help="Max steps for cf3dgs position learning rate")
     parser.add_argument('--app_opt', action='store_true', help="Enable appearance optimization. (experimental)")
     parser.add_argument('--app_embed_dim', type=int, default=16, help="Appearance embedding dimension")
     parser.add_argument('--app_opt_lr', type=float, default=1e-3, help="Learning rate for appearance optimization")
@@ -136,7 +125,6 @@ def get_args_parser():
     parser.add_argument('--position_lr_max_steps', type=int, default=5000, help="Max steps for cf3dgs position learning rate")
     parser.add_argument('--deform_lr_max_steps', type=int, default=5000, help="Max steps for cf3dgs deformation learning rate")
 
-    parser.add_argument('--canny_opt', action='store_true', help="Enable canny optimization")
     parser.add_argument('--camera_smoothness_loss', action='store_true', default="True",help="Enable camera smoothness loss")
     parser.add_argument('--camera_smoothness_lambda', type=float, default=1, help="Weight for camera smoothness loss")
 
@@ -145,21 +133,17 @@ def get_args_parser():
     parser.add_argument('--world_size',type=int, default=1)
 
     parser.add_argument('--test_gs', action='store_true', help="Test GS")
-    parser.add_argument('--fix_strategy', action='store_true', help="Fix gaussian number ")
-    parser.add_argument('--use_spec_points', action = 'store_true', help="Add SMPL vertices to the intialization for gaussian splatting")
     parser.add_argument('--background_color', type=float, nargs='*', default=None, help="Background color for the renderer")    
 
     # gs options
-    parser.add_argument("--gs_refine", action='store_true', default=False, help="whether use gaussian splatting to refine camera poses")
-    parser.add_argument("--gs_pose", action='store_true', help="purely use gs for pose estimation")
+    parser.add_argument("--gs_refine", action='store_true', default=False, help="use SmallGS to refine camera poses")
+    parser.add_argument("--gs_pose", action='store_true', default=True,help="use SmallGS for pose estimation")
     parser.add_argument("--monst3r_camera", action='store_true', help="use monst3r to estimate camera poses")
     parser.add_argument("--use_monst3r_intermediate", action='store_true', help="monst3r intermediate pointmaps")
 
     parser.add_argument("--dino", action='store_true', default=False, help="use dino model")
     parser.add_argument("--ft_loss_lambda", type=float, default=1, help="feature loss lambda")
-    parser.add_argument("--dino_dim", type=int, default=6, help="use feature loss")
-    parser.add_argument("--identity_prior", action='store_true', default=False, help="encourage camera pose to be identity")
-    parser.add_argument("--identity_prior_lambda", type=float, default=0.1, help="identity prior lambda")
+    parser.add_argument("--dino_dim", type=int, default=16, help="use feature loss")
     return parser
 
 def get_3D_model_from_scene(outdir, silent, scene, min_conf_thr=3, as_pointcloud=False, mask_sky=False,
@@ -244,10 +228,7 @@ def get_reconstructed_scene(args, outdir, model, device, silent, image_size, fil
     if new_model_weights != args.weights:
         model = AsymmetricCroCo3DStereo.from_pretrained(new_model_weights).to(device)
     model.eval()
-    if seq_name != "NULL":
-        dynamic_mask_path = f'data/davis/DAVIS/masked_images/480p/{seq_name}'
-    else:
-        dynamic_mask_path = None
+    dynamic_mask_path = None
     imgs = load_images(filelist, size=image_size, verbose=not silent, dynamic_mask_root=dynamic_mask_path, fps=fps, num_frames=num_frames)
     if len(imgs) == 1:
         imgs = [imgs[0], copy.deepcopy(imgs[0])]
@@ -571,10 +552,6 @@ if __name__ == '__main__':
         os.makedirs(tmp_path, exist_ok=True)
         tempfile.tempdir = tmp_path
 
-    if args.server_name is not None:
-        server_name = args.server_name
-    else:
-        server_name = '0.0.0.0' if args.local_network else '127.0.0.1'
 
     if args.weights is not None and os.path.exists(args.weights):
         weights_path = args.weights

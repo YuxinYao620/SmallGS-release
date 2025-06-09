@@ -277,18 +277,6 @@ def create_optimizers(splats,batch_size,world_size,scene_scale, sparse_grad,feat
         params.append(("features", features, 2.5e-3))
         colors = torch.nn.Parameter(splats['colors'])
         params.append(("colors", colors, 2.5e-3))
-    # if feature_dim is None:
-    #     # color is SH coefficients.
-    #     # colors = torch.zeros((N, (sh_degree + 1) ** 2, 3))  # [N, K, 3]
-    #     # colors[:, 0, :] = rgb_to_sh(rgbs)
-    #     params.append(("sh0", torch.nn.Parameter(colors[:, :1, :]), 2.5e-3))
-    #     params.append(("shN", torch.nn.Parameter(colors[:, 1:, :]), 2.5e-3 / 20))
-    # else:
-    #     # features will be used for appearance and view-dependent shading
-    #     features = torch.rand(N, feature_dim)  # [N, feature_dim]
-    #     params.append(("features", torch.nn.Parameter(features), 2.5e-3))
-    #     colors = torch.logit(rgbs)  # [N, 3]
-    #     params.append(("colors", torch.nn.Parameter(colors), 2.5e-3))
 
     optimizers = {
         name: (torch.optim.SparseAdam if sparse_grad else torch.optim.Adam)(
@@ -359,7 +347,6 @@ class Runner:
             patch_size=opt.patch_size,
             load_depths=opt.depth_loss,
             load_semantics=opt.semantics_opt,
-            load_canny=opt.canny_opt,
             datatype = opt.datatype,
             # background_color = opt.background_color,
             dino = opt.dino,
@@ -669,9 +656,6 @@ class Runner:
                 
                 loss += (1- step/max_steps_local)*self.opt.camera_smoothness_lambda * smoothness_loss
 
-            if self.opt.identity_prior and camera_opt:
-                identity_loss = F.mse_loss(camtoworlds_transformed[:,:3,:3], torch.eye(3).unsqueeze(0).repeat(camtoworlds_transformed.shape[0],1,1).to(self.device))
-                loss += self.opt.identity_prior_lambda * identity_loss
 
             desc = f"loss={loss.item():.3f}| " f"sh degree={sh_degree_to_use}| "
                 
@@ -1153,17 +1137,9 @@ class Runner:
 
         for i in range(0, end_frame-start_frame):
             cam_pose_est = global_cam_poses_est_aligned[i]
-            # cam_pose_gt = global_cam_poses_gt[i]
-
             est_x.append(cam_pose_est[0, 3])
             est_y.append(cam_pose_est[1, 3])
             est_z.append(cam_pose_est[2, 3])
-
-            # gt_x.append(cam_pose_gt[0, 3])
-            # gt_y.append(cam_pose_gt[1, 3])
-            # gt_z.append(cam_pose_gt[2, 3])
-            # ax.scatter(cam_pose_est[0, 3], cam_pose_est[1, 3], cam_pose_est[2, 3], c='r', marker='o', rasterized = True)
-            # ax.scatter(cam_pose_gt[0, 3], cam_pose_gt[1, 3], cam_pose_gt[2, 3], c='b', marker='x', rasterized = True)
         for i in range(0, len(global_cam_poses_gt)):
             cam_pose_gt = global_cam_poses_gt[i]
             gt_x.append(cam_pose_gt[0, 3])
@@ -1173,7 +1149,6 @@ class Runner:
         ax.plot(gt_x, gt_y, gt_z, c='b', label='gt')
         ax.legend(['est', 'gt'])
         plt.savefig(f"{self.traj_dir}/traj_{start_frame}_to_{end_frame}.png")
-        # plt.savefig(f"{self.traj_dir}/traj_{start_frame}_to_{end_frame}.pdf", dpi = 200, bbox_inches='tight')
 
 
     @torch.no_grad()
@@ -1184,7 +1159,6 @@ class Runner:
         device = self.device
         world_rank = self.world_rank
         world_size = self.world_size
-        # camtoworlds_est = torch.stack([data_block[0]['camtoworld'].to(device)]+[cam_pose.to(device) for cam_pose in est_cam_pose]).to(device)
         camtoworlds_est = est_cam_pose
         for i,data in enumerate(data_block):
             ellipse_time = 0
@@ -1200,36 +1174,18 @@ class Runner:
             height, width = pixels.shape[1:3]
             torch.cuda.synchronize()
             tidx = torch.Tensor([data["image_id"]]).int().squeeze().to(device)
-            if 'labels' in self.splats.keys():
-                dynamic_points = self.splats['means'][self.splats['labels'] == 0]
-                points, scaled_factor, min_value = normalize_points(dynamic_points)
 
-                # overwrite the corresponding points
-                renders, alphas, info = self.rasterize_splats_sem(
-                    camtoworlds= camtoworlds,
-                    Ks=Ks,
-                    width=width,
-                    height=height,
-                    sh_degree=opt.sh_degree,
-                    near_plane=opt.near_plane,
-                    far_plane=opt.far_plane,
-                    render_mode="RGB+ED" if opt.depth_loss else "RGB"
+            renders, _, _ = self.rasterize_splats(
+                camtoworlds=camtoworlds,
+                Ks=Ks,
+                width=width,
+                height=height,
+                sh_degree=opt.sh_degree if not self.opt.dino else None,
+                near_plane=opt.near_plane,
+                far_plane=opt.far_plane,
+                render_mode="RGB+ED" if opt.depth_loss else "RGB"
 
-            )
-
-            else:
-
-                renders, _, _ = self.rasterize_splats(
-                    camtoworlds=camtoworlds,
-                    Ks=Ks,
-                    width=width,
-                    height=height,
-                    sh_degree=opt.sh_degree if not self.opt.dino else None,
-                    near_plane=opt.near_plane,
-                    far_plane=opt.far_plane,
-                    render_mode="RGB+ED" if opt.depth_loss else "RGB"
-
-                )  # [1, H, W, 3]  
+            )  # [1, H, W, 3]  
             if renders.shape[-1] == 4:
                 colors, depths_0 = renders[..., 0:3], renders[..., 3:4]
             else:

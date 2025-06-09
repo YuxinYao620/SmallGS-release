@@ -156,9 +156,9 @@ if __name__ == "__main__":
             traj_by_label = {
             "Ground-truth": plot_gt,
             "Monst3r": plot_monster,
-            # "Refined": traj_refined,
-            # "CF3DGS": traj_cf3dgs,
-            # "Droid": traj_droid,
+            "Refined": traj_refined,
+            "CF3DGS": traj_cf3dgs,
+            "Droid": traj_droid,
             "SmallGS": plot_gs,
             }
             plot_mode = plot.PlotMode.xyz
